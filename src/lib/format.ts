@@ -3,12 +3,40 @@
 
 import { currencySymbol } from './currency'
 
-/** Parse a free-typed numeric field. Returns null for empty/invalid input. */
+/** Parse a free-typed numeric field. Returns null for empty/invalid input.
+ *  Thousand separators (commas) are stripped first so grouped display round-trips. */
 export function parseNumberInput(raw: string): number | null {
-  const t = raw.trim()
+  const t = raw.trim().replace(/,/g, '')
   if (t === '') return null
   const n = Number(t)
   return Number.isFinite(n) ? n : null
+}
+
+/** Insert thousand separators into the integer part of a *clean* numeric string
+ *  (digits, one leading '-', a single '.'). Preserves the sign, the decimal part,
+ *  and a trailing '.' typed mid-entry. e.g. "9000000" → "9,000,000", "0.30" → "0.30". */
+export function groupThousands(s: string): string {
+  if (s === '' || s === '-') return s
+  const neg = s.startsWith('-')
+  const body = neg ? s.slice(1) : s
+  const dot = body.indexOf('.')
+  const intPart = dot >= 0 ? body.slice(0, dot) : body
+  const decPart = dot >= 0 ? body.slice(dot + 1) : null
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return (neg ? '-' : '') + grouped + (decPart !== null ? '.' + decPart : '')
+}
+
+/** Sanitize a free-typed value (drop stray chars, keep one sign + one '.') and group
+ *  it with thousand separators for live display while the user types. */
+export function formatNumericInput(raw: string): string {
+  let s = raw.replace(/[^\d.-]/g, '')
+  const neg = s.startsWith('-')
+  s = s.replace(/-/g, '')
+  const firstDot = s.indexOf('.')
+  if (firstDot >= 0) {
+    s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, '')
+  }
+  return groupThousands((neg ? '-' : '') + s)
 }
 
 /** Full money for display, e.g. (30000000, 'EUR') → "€ 30,000,000". */

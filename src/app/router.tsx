@@ -3,6 +3,7 @@ import { AppShell } from './AppShell'
 import { TemplatesPage } from '@/routes/templates/TemplatesPage'
 import { PortfoliosPage } from '@/routes/portfolios/PortfoliosPage'
 import { FundsPage } from '@/routes/funds/FundsPage'
+import { ActualsPage } from '@/routes/actuals/ActualsPage'
 import { SettingsPage } from '@/routes/settings/SettingsPage'
 
 export const router = createBrowserRouter([
@@ -14,6 +15,7 @@ export const router = createBrowserRouter([
       { path: 'templates', element: <TemplatesPage /> },
       { path: 'portfolios', element: <PortfoliosPage /> },
       { path: 'funds', element: <FundsPage /> },
+      { path: 'actuals', element: <ActualsPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],
   },

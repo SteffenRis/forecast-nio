@@ -1,4 +1,4 @@
-import { Layers, LayoutTemplate, Settings, SquareChartGantt } from 'lucide-react'
+import { ClipboardList, Layers, LayoutTemplate, Settings, SquareChartGantt } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export interface NavEntry {
@@ -40,6 +40,15 @@ export const NAV: NavEntry[] = [
     group: 'top',
     title: 'Funds',
     sub: 'Every fund forecast, with plan-vs-actual tracking.',
+  },
+  {
+    id: 'actuals',
+    label: 'Actuals',
+    icon: ClipboardList,
+    route: '/actuals',
+    group: 'top',
+    title: 'Actuals',
+    sub: 'Upload realized contributions, distributions and NAV, quarter by quarter.',
   },
   {
     id: 'settings',
