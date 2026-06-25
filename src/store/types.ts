@@ -111,12 +111,22 @@ export interface ActualsRecord {
 export interface Fund {
   id: string
   name: string
+  /** The GP / manager name. Descriptive only — not read by the engine. */
+  gpName?: string
   templateId: string
   commitment: number
+  /** GP fund size at final close. Descriptive context only — not read by the engine. */
+  fundSizeActual?: number
+  /** GP target size at first close. Descriptive context only — not read by the engine. */
+  targetFundSize?: number
   currency: string
+  /** When the LP committed (signed). Descriptive only — the engine uses effectiveDate. */
+  acceptanceDate?: IsoDate
   effectiveDate: IsoDate
   /** If unset, falls back to standardLiquidationDate (§6 / §10.1). */
   expectedLiquidationDate?: IsoDate
+  /** Derived in the editor from effectiveDate + the template's fundLifeYears; the
+   *  engine's liquidation fallback when expectedLiquidationDate is unset. */
   standardLiquidationDate: IsoDate
   status: FundStatus
   sliders: FundSliders
