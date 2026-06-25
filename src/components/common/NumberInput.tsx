@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/cn'
-import { parseNumberInput } from '@/lib/format'
+import { formatNumericInput, groupThousands, parseNumberInput } from '@/lib/format'
 
 interface NumberInputProps {
   value: number | undefined
@@ -16,7 +16,8 @@ interface NumberInputProps {
 
 /** Controlled numeric field with a local string draft. Commits on blur / Enter;
  *  Escape reverts. Shows a rounded display (when `decimals` is set) at rest and the
- *  full value while editing, so the user always edits the true number. */
+ *  full value while editing, so the user always edits the true number. Integers are
+ *  grouped with thousand separators both at rest and live as the user types. */
 export function NumberInput({
   value,
   onCommit,
@@ -26,6 +27,9 @@ export function NumberInput({
   align = 'right',
   decimals,
 }: NumberInputProps) {
+  const ref = useRef<HTMLInputElement>(null)
+  // Digits-before-caret to restore after a grouped reformat shifts the string.
+  const caretRef = useRef<number | null>(null)
   const [draft, setDraft] = useState(() => toDisplay(value, decimals))
   const [editing, setEditing] = useState(false)
 
@@ -33,6 +37,15 @@ export function NumberInput({
   useEffect(() => {
     if (!editing) setDraft(toDisplay(value, decimals))
   }, [value, editing, decimals])
+
+  // After grouping reflows the string, restore the caret to the same digit offset.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (caretRef.current === null || !el) return
+    const pos = caretFromValueCount(draft, caretRef.current)
+    el.setSelectionRange(pos, pos)
+    caretRef.current = null
+  }, [draft])
 
   function commit() {
     const n = parseNumberInput(draft)
@@ -43,6 +56,7 @@ export function NumberInput({
 
   return (
     <input
+      ref={ref}
       type="text"
       inputMode="decimal"
       aria-label={ariaLabel}
@@ -50,7 +64,7 @@ export function NumberInput({
       placeholder={placeholder}
       onFocus={(e) => {
         setEditing(true)
-        setDraft(toFull(value)) // reveal full precision for editing
+        setDraft(toFull(value)) // reveal full precision (still grouped) for editing
         const el = e.currentTarget
         requestAnimationFrame(() => {
           try {
@@ -60,7 +74,13 @@ export function NumberInput({
           }
         })
       }}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => {
+        const el = e.currentTarget
+        const raw = el.value
+        const sel = el.selectionStart ?? raw.length
+        caretRef.current = countValueChars(raw.slice(0, sel))
+        setDraft(formatNumericInput(raw))
+      }}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur()
@@ -79,13 +99,33 @@ export function NumberInput({
   )
 }
 
-/** Full-precision string for editing. */
+/** Full-precision string for editing, grouped with thousand separators. */
 function toFull(value: number | undefined): string {
-  return value === undefined || Number.isNaN(value) ? '' : String(value)
+  return value === undefined || Number.isNaN(value) ? '' : groupThousands(String(value))
 }
 
-/** At-rest display: rounded to `decimals` if given, else the raw value. */
+/** At-rest display: rounded to `decimals` if given, else the raw value; grouped. */
 function toDisplay(value: number | undefined, decimals: number | undefined): string {
   if (value === undefined || Number.isNaN(value)) return ''
-  return decimals === undefined ? String(value) : value.toFixed(decimals)
+  return groupThousands(decimals === undefined ? String(value) : value.toFixed(decimals))
+}
+
+/** Count value-significant chars (everything but the inserted commas). */
+function countValueChars(s: string): number {
+  let n = 0
+  for (const c of s) if (c !== ',') n++
+  return n
+}
+
+/** Index in `formatted` just past the Nth value-significant char (skipping commas). */
+function caretFromValueCount(formatted: string, count: number): number {
+  if (count <= 0) return 0
+  let seen = 0
+  for (let i = 0; i < formatted.length; i++) {
+    if (formatted[i] !== ',') {
+      seen++
+      if (seen === count) return i + 1
+    }
+  }
+  return formatted.length
 }
