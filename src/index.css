@@ -1,0 +1,57 @@
+@import 'tailwindcss';
+
+/* ---- FundFrame design tokens (from the App Shell design reference) ----
+   Tailwind v4 reads `@theme` to generate utilities. The slate scale, white,
+   etc. ship with Tailwind; we add the FundFrame-specific brand + semantic
+   tokens, fonts, shadows and radii here so utilities + components stay on-brand. */
+@theme {
+  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+
+  --color-brand-navy: #0a1a4d;
+  --color-body: #0f172a;
+  --color-muted: #64748b;
+  --color-positive: #059669;
+  --color-negative: #dc2626;
+
+  --color-border-default: #e2e8f0;
+  --color-border-subtle: #eef2f7;
+
+  --shadow-xs: 0 1px 1px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+
+  --radius-frame: 13px;
+  --radius-nav: 7px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-body);
+  font-size: 14px;
+  background: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* thin scrollbars to match the data-dense aesthetic */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 6px;
+  border: 2px solid #f8fafc;
+}
