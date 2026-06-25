@@ -19,6 +19,8 @@ export interface FundsSlice {
   ) => void
   setFundFees: (id: string, patch: Partial<FeeTerms>) => void
   setFundSliders: (id: string, patch: Partial<FundSliders>) => void
+  /** Replace a fund wholesale (the editor's Save path — commits a staged draft). */
+  upsertFund: (fund: Fund) => void
   removeFund: (id: string) => void
   duplicateFund: (id: string) => string | null
 
@@ -91,6 +93,12 @@ export const createFundsSlice: SliceCreator<FundsSlice> = (set, get) => ({
     set((s) => {
       const f = s.funds[id]
       if (f) Object.assign(f.sliders, patch)
+    }),
+
+  upsertFund: (fund) =>
+    set((s) => {
+      s.funds[fund.id] = fund
+      if (!s.fundOrder.includes(fund.id)) s.fundOrder.push(fund.id)
     }),
 
   removeFund: (id) =>
