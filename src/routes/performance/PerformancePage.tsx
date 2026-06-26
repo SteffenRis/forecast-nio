@@ -119,7 +119,7 @@ export function PerformancePage() {
           {fund && (
             <PerformanceGrid
               key={fund.id}
-              fund={fund}
+              currency={fund.currency}
               data={data}
               showForecast={showForecast}
               onToggleForecast={setShowForecast}

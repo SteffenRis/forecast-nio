@@ -16,6 +16,25 @@ export const selectFunds = (s: StoreState): Fund[] =>
 export const selectPortfolios = (s: StoreState): Portfolio[] =>
   s.portfolioOrder.map((id) => s.portfolios[id]).filter(Boolean)
 
+/** Total committed to each fund across ALL portfolios (fundId → sum of allocated
+ *  commitments, in the fund's own currency). Drives the over-allocation guardrail:
+ *  a fund is over-committed when this exceeds the fund's `commitment`. Returns a
+ *  fresh object — call inside useMemo, not directly in a useStore subscription. */
+export function sumFundAllocations(
+  portfolios: Record<string, Portfolio>,
+  portfolioOrder: string[],
+): Record<string, number> {
+  const totals: Record<string, number> = {}
+  for (const pid of portfolioOrder) {
+    const p = portfolios[pid]
+    if (!p) continue
+    for (const [fundId, a] of Object.entries(p.allocations)) {
+      totals[fundId] = (totals[fundId] ?? 0) + a.allocatedCommitment
+    }
+  }
+  return totals
+}
+
 /** Funds allocated into a portfolio, paired with their allocated commitment. */
 export function selectPortfolioFunds(
   s: StoreState,
