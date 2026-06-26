@@ -10,6 +10,9 @@ export interface NavEntry {
   /** Page heading + subheading rendered by the destination. */
   title: string
   sub: string
+  /** Routable + topbar-resolvable, but not shown in the sidebar. Used for fund
+   *  sub-pages (Edit fund, Actuals) that are reached via the Funds-screen kebab. */
+  hidden?: boolean
 }
 
 /** Four flat destinations — Forecasting is the whole app (no module switcher). */
@@ -33,20 +36,33 @@ export const NAV: NavEntry[] = [
     sub: 'Roll-up forecasts across funds in a portfolio.',
   },
   {
-    id: 'funds',
+    id: 'performance',
     label: 'Funds',
+    icon: SquareChartGantt,
+    route: '/performance',
+    group: 'top',
+    title: 'Funds',
+    sub: 'Plan vs actual per fund — open the editor or actuals from the menu.',
+  },
+  {
+    // Fund input editor — reached via the Funds-screen kebab, not the sidebar.
+    id: 'funds',
+    label: 'Edit fund',
     icon: SquareChartGantt,
     route: '/funds',
     group: 'top',
-    title: 'Funds',
-    sub: 'Every fund forecast, with plan-vs-actual tracking.',
+    hidden: true,
+    title: 'Edit fund',
+    sub: 'Commitment, dates, fee terms and carry for the selected fund.',
   },
   {
+    // Quarterly actuals entry — reached via the Funds-screen kebab, not the sidebar.
     id: 'actuals',
     label: 'Actuals',
     icon: ClipboardList,
     route: '/actuals',
     group: 'top',
+    hidden: true,
     title: 'Actuals',
     sub: 'Upload realized contributions, distributions and NAV, quarter by quarter.',
   },

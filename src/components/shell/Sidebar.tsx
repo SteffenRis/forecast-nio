@@ -9,8 +9,8 @@ export function Sidebar() {
   const collapsed = useStore((s) => s.ui.sidebarCollapsed)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
 
-  const top = NAV.filter((n) => n.group === 'top')
-  const foot = NAV.filter((n) => n.group === 'foot')
+  const top = NAV.filter((n) => n.group === 'top' && !n.hidden)
+  const foot = NAV.filter((n) => n.group === 'foot' && !n.hidden)
 
   return (
     <aside
