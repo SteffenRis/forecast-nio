@@ -5,12 +5,14 @@ import { useStore } from '@/store'
 import { CURRENCIES, currencySymbol } from '@/lib/currency'
 import { formatMoneyCompact } from '@/lib/format'
 import { NumberInput } from '@/components/common/NumberInput'
+import { Tabs } from '@/components/common/Tabs'
 import { Drawer } from '@/components/common/Drawer'
 import { sumFundAllocations } from '@/store/selectors/entities'
 import { portfolioFxRate } from '@/lib/portfolio'
 import type { Portfolio } from '@/store/types'
 import { PerformanceGrid } from '@/routes/performance/PerformanceGrid'
 import { PortfolioRollup } from './PortfolioRollup'
+import { PortfolioKidBridge } from './PortfolioKidBridge'
 import { usePortfolioComparison, type LookthroughEntry } from './usePortfolioComparison'
 
 const textField =
@@ -67,6 +69,9 @@ export function PortfolioEditor({ portfolioId }: { portfolioId: string }) {
   const updatePortfolio = useStore((s) => s.updatePortfolio)
   const setAllocation = useStore((s) => s.setAllocation)
   const removeAllocation = useStore((s) => s.removeAllocation)
+
+  // Which analysis view sits below the editor: the pro-rata roll-up or the KID bridge.
+  const [tab, setTab] = useState<'rollup' | 'kid'>('rollup')
 
   // Total committed to each fund across ALL portfolios (over-allocation guardrail).
   const totalsAcrossPortfolios = useMemo(
@@ -287,9 +292,22 @@ export function PortfolioEditor({ portfolioId }: { portfolioId: string }) {
         )}
       </div>
 
-      <PortfolioRollup portfolioId={portfolioId} />
+      <div className="pt-1">
+        <Tabs
+          ariaLabel="Portfolio analysis"
+          tabs={[
+            { id: 'rollup', label: 'Roll-up' },
+            { id: 'kid', label: 'KID bridge' },
+          ]}
+          value={tab}
+          onChange={setTab}
+        />
+      </div>
+      {tab === 'rollup' && <PortfolioRollup portfolioId={portfolioId} />}
+      {tab === 'kid' && <PortfolioKidBridge portfolioId={portfolioId} />}
 
-      {/* Lookthrough: a fund's contribution to this portfolio, with click-to-trace cells. */}
+      {/* Lookthrough: a fund's contribution to this portfolio, with click-to-trace cells.
+       *  Triggered from the always-visible Underlying-funds table, so it spans both tabs. */}
       <Drawer
         open={!!openFundId}
         onClose={() => setOpenFundId(null)}
