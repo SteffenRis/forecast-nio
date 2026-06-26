@@ -32,6 +32,12 @@ export interface HurdleCarryResult {
   thresholdN: Money;
   /** Cumulative gross distribution G_cum(q) (for IRRs / invariants). */
   Gcum: Money[];
+  /** owedBeforeDist(q) = B(q−1)·(1+r_q) + p(q) — the hurdle-accrued balance the LP
+   *  is owed at q BEFORE that quarter's distribution pays it down. Surfaced for the
+   *  trace view; the recurrence is B(q) = max(0, owedBeforeDist(q) − d(q)). */
+  owedBeforeDist: Money[];
+  /** Quarterly hurdle rate r_q = (1+hurdleAnnual)^(1/4) − 1. */
+  rq: Ratio;
 }
 
 /** Quarterly rate from annual: r_q = (1+r_annual)^(1/4) − 1. */
@@ -132,5 +138,5 @@ export function computeHurdleCarry(input: HurdleCarryInput): HurdleCarryResult {
     prevCC = carryCum[q];
   }
 
-  return { B, carryCum, carry, qClearIndex: qClear, thresholdN, Gcum };
+  return { B, carryCum, carry, qClearIndex: qClear, thresholdN, Gcum, owedBeforeDist, rq };
 }

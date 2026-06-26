@@ -133,6 +133,7 @@ export function PerformancePage() {
               data={data}
               showForecast={showForecast}
               onToggleForecast={setShowForecast}
+              commitment={fund.commitment}
             />
           )}
         </>

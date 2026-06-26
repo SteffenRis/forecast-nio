@@ -43,6 +43,27 @@ export interface FeeBridgeResult {
 }
 
 /**
+ * The inception-bridge result, plus the per-quarter intermediates the calculation
+ * passes through. These are surfaced (additively) so an auditability/trace view can
+ * show every step — the basis chosen, the stock it was applied to, the rate — without
+ * the UI re-deriving any math. The plain `FeeBridgeResult` (calendar variant) is
+ * unchanged.
+ */
+export interface FeeBridgeInceptionResult extends FeeBridgeResult {
+  /** Per-quarter: is the quarter inside the investment period (IP rate) or post-IP? */
+  inIP: boolean[];
+  mgmtBasis: FeeBasis[];
+  mgmtRate: Ratio[];
+  /** The basis "stock" the management rate was applied to (the fee denominator). */
+  mgmtStock: Money[];
+  expenseBasis: FeeBasis[];
+  expenseRate: Ratio[];
+  expenseStock: Money[];
+  /** 0-based index of the last inception quarter that still gets the IP rate. */
+  qIPEndIndex: number;
+}
+
+/**
  * §10.1 Fund-life pro-rata:
  *   pr(q) = days_30_360(max(eff, qtr_start), min(eff_liq, qtr_end)) / 90
  */
@@ -118,7 +139,7 @@ function inceptionQuarterOf(effectiveDate: Date, d: Date): number {
 
 export function computeFeeBridgeInception(
   input: FeeBridgeInceptionInput,
-): FeeBridgeResult {
+): FeeBridgeInceptionResult {
   const {
     nInc,
     P,
@@ -137,6 +158,14 @@ export function computeFeeBridgeInception(
   const expenses: Money[] = new Array(nInc).fill(0);
   const establishment: Money[] = new Array(nInc).fill(0);
   const pr: Ratio[] = new Array(nInc).fill(1); // every inception quarter is full
+  // Intermediates (additive — see FeeBridgeInceptionResult).
+  const inIPArr: boolean[] = new Array(nInc).fill(false);
+  const mgmtBasisArr: FeeBasis[] = new Array(nInc).fill('commitment');
+  const mgmtRateArr: Ratio[] = new Array(nInc).fill(0);
+  const mgmtStockArr: Money[] = new Array(nInc).fill(0);
+  const expenseBasisArr: FeeBasis[] = new Array(nInc).fill('commitment');
+  const expenseRateArr: Ratio[] = new Array(nInc).fill(0);
+  const expenseStockArr: Money[] = new Array(nInc).fill(0);
 
   for (let idx = 0; idx < nInc; idx++) {
     const i = idx + 1; // 1-indexed inception quarter
@@ -156,9 +185,30 @@ export function computeFeeBridgeInception(
     if (i === 1) {
       establishment[idx] = C * fees.establishmentRate;
     }
+
+    inIPArr[idx] = inIP;
+    mgmtBasisArr[idx] = mgmtBasis;
+    mgmtRateArr[idx] = mgmtRate;
+    mgmtStockArr[idx] = mgmtStock;
+    expenseBasisArr[idx] = expBasis;
+    expenseRateArr[idx] = expRate;
+    expenseStockArr[idx] = expStock;
   }
 
-  return { mgmtFee, expenses, establishment, pr };
+  return {
+    mgmtFee,
+    expenses,
+    establishment,
+    pr,
+    inIP: inIPArr,
+    mgmtBasis: mgmtBasisArr,
+    mgmtRate: mgmtRateArr,
+    mgmtStock: mgmtStockArr,
+    expenseBasis: expenseBasisArr,
+    expenseRate: expenseRateArr,
+    expenseStock: expenseStockArr,
+    qIPEndIndex: Math.max(0, qIPEnd - 1),
+  };
 }
 
 export function computeFeeBridge(input: FeeBridgeInput): FeeBridgeResult {
