@@ -89,9 +89,20 @@ interface Props {
   data: QuarterComparison[]
   showForecast: boolean
   onToggleForecast: (v: boolean) => void
+  /** Card heading (default 'Plan vs actual'). Overridden for lookthrough per-fund grids. */
+  title?: string
+  /** Hide the Show-forecast toggle (e.g. lookthrough grids that follow a shared toggle). */
+  hideToggle?: boolean
 }
 
-export function PerformanceGrid({ currency, data, showForecast, onToggleForecast }: Props) {
+export function PerformanceGrid({
+  currency,
+  data,
+  showForecast,
+  onToggleForecast,
+  title = 'Plan vs actual',
+  hideToggle = false,
+}: Props) {
 
   // Toggle OFF → only quarters that have an actual (one Actual line each).
   // Toggle ON  → the full forecast horizon (Plan always; Actual/Δ where present).
@@ -103,21 +114,23 @@ export function PerformanceGrid({ currency, data, showForecast, onToggleForecast
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Plan vs actual
+              {title}
             </h3>
             <p className="mt-0.5 text-[12px] text-muted">
               Amounts in {currency} ({currencySymbol(currency)}). Δ = Actual − Forecast; the plan
               ignores actuals, so deviations reflect tracking against underwriting.
             </p>
           </div>
-          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[12px] font-medium text-muted">
-            <span>Show forecast &amp; deviations</span>
-            <Toggle
-              checked={showForecast}
-              onChange={onToggleForecast}
-              ariaLabel="Show forecast and deviations"
-            />
-          </label>
+          {!hideToggle && (
+            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[12px] font-medium text-muted">
+              <span>Show forecast &amp; deviations</span>
+              <Toggle
+                checked={showForecast}
+                onChange={onToggleForecast}
+                ariaLabel="Show forecast and deviations"
+              />
+            </label>
+          )}
         </div>
 
         {rows.length === 0 ? (

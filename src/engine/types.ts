@@ -261,12 +261,20 @@ export interface PortfolioFundRef {
 }
 
 /**
- * FX rates keyed by "FROM->TO". Per-quarter rates may be supplied; here we use
- * a flat rate map for simplicity (a function could be supplied at the boundary).
+ * FX rates keyed by "FROM->TO". `rates` is the flat fallback (always honoured).
+ * The optional members add a time dimension used by §11 portfolio aggregation:
+ * historical actuals quarters convert at their own `periodRates` rate, while
+ * forecast quarters convert at a single `forecastRates` rate. When the optional
+ * members are absent the engine falls back to `rates` for every quarter, which
+ * reproduces the original flat-rate behaviour exactly.
  */
 export interface FxTable {
   /** key: `${from}->${to}` → rate (multiply amount in `from` to get `to`). */
   rates: Record<string, number>;
+  /** Per-quarter historical rates: `${from}->${to}` → { calQuarterOrdinal → rate }. */
+  periodRates?: Record<string, Record<number, number>>;
+  /** Forecast rate per pair: `${from}->${to}` → rate (forecast quarters + PIC denom). */
+  forecastRates?: Record<string, number>;
 }
 
 export interface PortfolioInput {

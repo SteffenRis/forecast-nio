@@ -48,6 +48,7 @@ export function partialize(s: StoreState): Partial<StoreState> {
   return {
     ...dataFromState(s),
     fxRates: s.fxRates,
+    forecastRates: s.forecastRates,
     ui: { sidebarCollapsed: s.ui.sidebarCollapsed },
   }
 }

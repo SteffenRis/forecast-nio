@@ -90,5 +90,6 @@ export function clearAllData(): void {
     portfolios: {},
     portfolioOrder: [],
     fxRates: {},
+    forecastRates: {},
   })
 }

@@ -6,6 +6,7 @@ import {
   type ForecastRow,
 } from '../comparison'
 import { fundMultiples } from '../metrics'
+import { quarterOrdinal } from '../quarter'
 import type { ActualRow, QuarterAmounts, QuarterComparison } from '../comparison'
 
 // The Performance screen reshapes the baseline forecast (periodic flows) + actuals
@@ -295,5 +296,47 @@ describe('buildPortfolioComparison — aggregates underlying funds pro-rata', ()
     })
     expect(data[0].actual).toBeNull()
     expect(quarterDeviation(data[0].actual, data[0].forecast).contributed).toBeNull()
+  })
+
+  it('lookthrough invariant: per-fund contributions sum to the aggregate (per-quarter FX)', () => {
+    const ordQ1 = quarterOrdinal({ year: 2024, q: 1 })
+    // Per-quarter factors (mirrors the roll-up's pro-rata × time-varying FX): fund A uses
+    // a different rate in Q1 vs Q2; fund B is flat. The lookthrough decomposition must hold
+    // regardless of the per-quarter factor.
+    const fA = (ord: number) => (ord === ordQ1 ? 1.1 : 1.5)
+    const fB = (_ord: number) => 1.0
+    const fundA: QuarterComparison[] = [
+      cmp(2024, 1, amt(1_000, 100, 900), amt(800, 50, 750)),
+      cmp(2024, 2, amt(2_000, 200, 1_800)),
+    ]
+    const fundB: QuarterComparison[] = [
+      cmp(2024, 1, amt(500, 0, 400), amt(400, 0, 350)),
+      cmp(2024, 2, amt(900, 0, 800)),
+    ]
+
+    const aggregate = buildPortfolioComparison({
+      totalCommitment: 50_000,
+      funds: [
+        { comparison: fundA, factorForOrd: fA },
+        { comparison: fundB, factorForOrd: fB },
+      ],
+    })
+    const onlyA = buildPortfolioComparison({ totalCommitment: 30_000, funds: [{ comparison: fundA, factorForOrd: fA }] })
+    const onlyB = buildPortfolioComparison({ totalCommitment: 20_000, funds: [{ comparison: fundB, factorForOrd: fB }] })
+
+    expect(aggregate).toHaveLength(2)
+    aggregate.forEach((agg, i) => {
+      for (const side of ['forecast', 'actual'] as const) {
+        const a = agg[side]
+        const sum = (onlyA[i][side]?.contributed ?? 0) + (onlyB[i][side]?.contributed ?? 0)
+        expect(a?.contributed ?? 0).toBeCloseTo(sum, 6)
+        const sumD = (onlyA[i][side]?.distributed ?? 0) + (onlyB[i][side]?.distributed ?? 0)
+        expect(a?.distributed ?? 0).toBeCloseTo(sumD, 6)
+        const sumN = (onlyA[i][side]?.nav ?? 0) + (onlyB[i][side]?.nav ?? 0)
+        expect(a?.nav ?? 0).toBeCloseTo(sumN, 6)
+      }
+    })
+    // Spot-check the per-quarter FX actually varied: Q1 actual A = 800 × 1.1 = 880.
+    expect(onlyA[0].actual?.contributed).toBeCloseTo(880, 6)
   })
 })

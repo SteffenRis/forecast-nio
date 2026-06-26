@@ -240,8 +240,8 @@ export function PortfolioEditor({ portfolioId }: { portfolioId: string }) {
               </select>
               {hiddenNoFx > 0 && (
                 <span className="text-[12px] text-muted">
-                  {hiddenNoFx} fund{hiddenNoFx === 1 ? '' : 's'} hidden — no FX rate to {ccy} yet
-                  (FX-rate editing is coming).
+                  {hiddenNoFx} fund{hiddenNoFx === 1 ? '' : 's'} hidden — no FX rate to {ccy} yet.
+                  Pull rates on the Exchange Rates tab to roll {hiddenNoFx === 1 ? 'it' : 'them'} up.
                 </span>
               )}
             </div>
