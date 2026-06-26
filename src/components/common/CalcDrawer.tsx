@@ -102,6 +102,44 @@ export function CalcDrawer<R>({ selected, build, onClose }: Props<R>) {
             ))}
           </div>
 
+          {explanation.breakdown && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full border-separate border-spacing-0 text-[13px]">
+                <thead>
+                  <tr className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    {explanation.breakdown.columns.map((c, i) => (
+                      <th
+                        key={i}
+                        className={cn('pb-2 font-semibold', i === 0 ? 'text-left pr-3' : 'px-1.5 text-right')}
+                      >
+                        {c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {explanation.breakdown.rows.map((r, ri) => (
+                    <tr key={ri} className={cn(r.emphasis && 'font-semibold')}>
+                      {r.cells.map((cell, ci) => (
+                        <td
+                          key={ci}
+                          className={cn(
+                            'py-1.5',
+                            ci === 0 ? 'pr-3 text-left text-body' : 'px-1.5 text-right tabular-nums',
+                            ci === 0 ? '' : r.emphasis ? 'text-body' : 'text-muted',
+                            r.emphasis && 'border-t border-border-default pt-2',
+                          )}
+                        >
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           {explanation.checks.length > 0 && (
             <div className="mt-6">
               <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
