@@ -91,7 +91,7 @@ export function FundsPage() {
     <RoutePlaceholder navId="funds">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold tracking-[-0.02em]">Funds</h2>
+          <h2 className="text-xl font-bold tracking-[-0.02em]">Edit fund</h2>
           <p className="mt-1 max-w-2xl text-[13px] text-muted">
             Each fund forecasts against a template, with its own commitment, dates, fee terms
             and carry. Edits stage below until you Save.

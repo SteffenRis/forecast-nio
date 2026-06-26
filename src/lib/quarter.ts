@@ -15,6 +15,13 @@ export function quarterOrdinal(q: CalendarQuarterRef): number {
   return q.year * 4 + (q.q - 1)
 }
 
+/** Inverse of quarterOrdinal: rebuild { year, q } from a monotonic ordinal. */
+export function quarterFromOrdinal(ord: number): CalendarQuarterRef {
+  const year = Math.floor(ord / 4)
+  const q = ((ord % 4) + 1) as 1 | 2 | 3 | 4
+  return { year, q }
+}
+
 /** Comparator for Array.prototype.sort — orders quarters oldest → newest. */
 export function compareQuarter(a: CalendarQuarterRef, b: CalendarQuarterRef): number {
   return quarterOrdinal(a) - quarterOrdinal(b)

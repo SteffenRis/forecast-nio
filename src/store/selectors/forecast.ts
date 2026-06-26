@@ -187,6 +187,7 @@ function depsEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
 }
 
 const fundCache = new Map<string, { deps: unknown[]; result: FundForecastResult }>()
+const baselineCache = new Map<string, { deps: unknown[]; result: FundForecastResult }>()
 const portfolioCache = new Map<string, { deps: unknown[]; result: PortfolioForecastResult }>()
 
 function forecastFund(f: Fund, t: Template): FundForecastResult {
@@ -195,6 +196,20 @@ function forecastFund(f: Fund, t: Template): FundForecastResult {
   if (hit && depsEqual(hit.deps, deps)) return hit.result
   const result = runFundForecast(toFundInput(f, t))
   fundCache.set(f.id, { deps, result })
+  return result
+}
+
+/** The fund's forecast with actuals stripped — the original underwriting plan
+ *  (no §7 rebasing, no actuals-driven status zeroing; overrides still applied).
+ *  The Performance screen diffs this against actuals to show real deviations. */
+function forecastFundBaseline(f: Fund, t: Template): FundForecastResult {
+  const deps = [f, t]
+  const hit = baselineCache.get(f.id)
+  if (hit && depsEqual(hit.deps, deps)) return hit.result
+  const baseInput: FundInputJSON = { ...toFundInput(f, t) }
+  delete baseInput.actuals
+  const result = runFundForecast(baseInput)
+  baselineCache.set(f.id, { deps, result })
   return result
 }
 
@@ -216,6 +231,18 @@ export function selectFundForecast(s: StoreState, fundId: string): FundForecastR
   const template = s.templates[fund.templateId]
   if (!template) return null
   return forecastFund(fund, template)
+}
+
+/** The baseline plan (forecast with actuals stripped) — see forecastFundBaseline. */
+export function selectFundBaselineForecast(
+  s: StoreState,
+  fundId: string,
+): FundForecastResult | null {
+  const fund = s.funds[fundId]
+  if (!fund) return null
+  const template = s.templates[fund.templateId]
+  if (!template) return null
+  return forecastFundBaseline(fund, template)
 }
 
 export function selectPortfolioForecast(
@@ -240,6 +267,11 @@ export function selectPortfolioForecast(
 /** Memoized fund forecast — stable reference while inputs are unchanged. */
 export function useFundForecast(fundId: string): FundForecastResult | null {
   return useStore((s) => selectFundForecast(s, fundId))
+}
+
+/** Memoized baseline plan (forecast with actuals stripped). */
+export function useFundBaselineForecast(fundId: string): FundForecastResult | null {
+  return useStore((s) => selectFundBaselineForecast(s, fundId))
 }
 
 /** Memoized portfolio forecast (with optional LP overlay). */
