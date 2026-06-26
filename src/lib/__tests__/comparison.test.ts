@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { buildFundComparison, quarterDeviation, type ForecastRow } from '../comparison'
+import {
+  buildFundComparison,
+  buildPortfolioComparison,
+  quarterDeviation,
+  type ForecastRow,
+} from '../comparison'
 import { fundMultiples } from '../metrics'
-import type { ActualRow } from '../comparison'
+import type { ActualRow, QuarterAmounts, QuarterComparison } from '../comparison'
 
 // The Performance screen reshapes the baseline forecast (periodic flows) + actuals
 // (cumulative) into per-quarter Plan / Actual / Deviation lines. These cover the
@@ -174,5 +179,121 @@ describe('quarterDeviation — Actual − Plan per field', () => {
     expect(dev.tvpi).toBeNull()
     // PIC is defined (0/commitment) on both sides → delta is 0, not null.
     expect(dev.pic).toBe(0)
+  })
+})
+
+describe('buildPortfolioComparison — aggregates underlying funds pro-rata', () => {
+  // multiples on the input sides are ignored by the aggregator (recomputed vs the
+  // portfolio's total commitment), so any value works here.
+  const amt = (
+    contributed: number,
+    distributed: number,
+    nav: number,
+    recallable: number | null = null,
+  ): QuarterAmounts => ({
+    contributed,
+    distributed,
+    recallable,
+    nav,
+    multiples: fundMultiples({ commitment: 1, paidIn: contributed, distributed, nav }),
+  })
+  const cmp = (
+    year: number,
+    q: 1 | 2 | 3 | 4,
+    forecast: QuarterAmounts | null,
+    actual: QuarterAmounts | null = null,
+  ): QuarterComparison => ({ quarter: { year, q }, forecast, actual })
+
+  it('sums two funds’ plan cumulatives and recomputes multiples vs total commitment', () => {
+    const fundA = [cmp(2024, 1, amt(6_000_000, 0, 5_800_000))]
+    const fundB = [cmp(2024, 1, amt(4_000_000, 0, 3_900_000))]
+    const data = buildPortfolioComparison({
+      totalCommitment: 30_000_000,
+      funds: [
+        { comparison: fundA, factor: 1 },
+        { comparison: fundB, factor: 1 },
+      ],
+    })
+    expect(data).toHaveLength(1)
+    expect(data[0].forecast).toMatchObject({ contributed: 10_000_000, distributed: 0, nav: 9_700_000 })
+    expect(data[0].forecast?.multiples).toEqual(
+      fundMultiples({ commitment: 30_000_000, paidIn: 10_000_000, distributed: 0, nav: 9_700_000 }),
+    )
+  })
+
+  it('scales each fund by its factor (pro-rata × FX)', () => {
+    const fundA = [cmp(2024, 1, amt(10_000_000, 1_000_000, 9_000_000))]
+    const data = buildPortfolioComparison({
+      totalCommitment: 18_000_000,
+      funds: [{ comparison: fundA, factor: 0.6 }],
+    })
+    expect(data[0].forecast).toMatchObject({
+      contributed: 6_000_000,
+      distributed: 600_000,
+      nav: 5_400_000,
+    })
+  })
+
+  it('carries cumulative actuals forward across funds reporting on different quarters', () => {
+    const fundA: QuarterComparison[] = [cmp(2024, 1, null, amt(1_000_000, 0, 900_000))]
+    const fundB: QuarterComparison[] = [cmp(2024, 2, null, amt(2_000_000, 0, 1_800_000))]
+    const data = buildPortfolioComparison({
+      totalCommitment: 100_000_000,
+      funds: [
+        { comparison: fundA, factor: 1 },
+        { comparison: fundB, factor: 1 },
+      ],
+    })
+    expect(data.map((d) => d.quarter)).toEqual([
+      { year: 2024, q: 1 },
+      { year: 2024, q: 2 },
+    ])
+    // Q1: only A has reported.
+    expect(data[0].actual?.contributed).toBe(1_000_000)
+    // Q2: A's Q1 reading carried forward (1m) + B's Q2 (2m).
+    expect(data[1].actual?.contributed).toBe(3_000_000)
+    expect(data[1].actual?.nav).toBe(900_000 + 1_800_000)
+  })
+
+  it('aggregates recallable only from funds that report it', () => {
+    const fundA = [cmp(2024, 1, null, amt(1_000_000, 0, 0, 250_000))]
+    const fundB = [cmp(2024, 1, null, amt(2_000_000, 0, 0))] // recallable null
+    const data = buildPortfolioComparison({
+      totalCommitment: 1,
+      funds: [
+        { comparison: fundA, factor: 1 },
+        { comparison: fundB, factor: 1 },
+      ],
+    })
+    expect(data[0].actual?.recallable).toBe(250_000)
+  })
+
+  it('does not extend the actual past the latest reported quarter', () => {
+    // Fund reports an actual only at Q1, but its plan runs Q1→Q3. The roll-up shows
+    // the actual at Q1 only — never carried forward across the whole forecast horizon.
+    const fundA: QuarterComparison[] = [
+      cmp(2024, 1, amt(2_000_000, 0, 1_800_000), amt(1_000_000, 0, 900_000)),
+      cmp(2024, 2, amt(4_000_000, 0, 3_600_000)),
+      cmp(2024, 3, amt(6_000_000, 0, 5_400_000)),
+    ]
+    const data = buildPortfolioComparison({
+      totalCommitment: 10_000_000,
+      funds: [{ comparison: fundA, factor: 1 }],
+    })
+    expect(data).toHaveLength(3)
+    expect(data[0].actual?.contributed).toBe(1_000_000)
+    expect(data[1].actual).toBeNull()
+    expect(data[2].actual).toBeNull()
+    expect(data[2].forecast?.contributed).toBe(6_000_000)
+  })
+
+  it('leaves actual null where no underlying fund has actuals (plan-only)', () => {
+    const fundA = [cmp(2024, 1, amt(5_000_000, 0, 4_000_000))]
+    const data = buildPortfolioComparison({
+      totalCommitment: 10_000_000,
+      funds: [{ comparison: fundA, factor: 1 }],
+    })
+    expect(data[0].actual).toBeNull()
+    expect(quarterDeviation(data[0].actual, data[0].forecast).contributed).toBeNull()
   })
 })

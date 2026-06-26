@@ -8,7 +8,6 @@ import {
   type QuarterComparison,
   type QuarterDeviation,
 } from '@/lib/comparison'
-import type { Fund } from '@/store/types'
 import { Toggle } from '@/components/common/Toggle'
 
 const card = 'rounded-xl border border-border-default bg-white p-5 shadow-sm'
@@ -85,14 +84,14 @@ const TAG: Record<LineKind, { label: string; className: string }> = {
 }
 
 interface Props {
-  fund: Fund
+  /** Reporting currency for the amount captions (a fund's, or a portfolio's). */
+  currency: string
   data: QuarterComparison[]
   showForecast: boolean
   onToggleForecast: (v: boolean) => void
 }
 
-export function PerformanceGrid({ fund, data, showForecast, onToggleForecast }: Props) {
-  const { currency } = fund
+export function PerformanceGrid({ currency, data, showForecast, onToggleForecast }: Props) {
 
   // Toggle OFF → only quarters that have an actual (one Actual line each).
   // Toggle ON  → the full forecast horizon (Plan always; Actual/Δ where present).
@@ -126,7 +125,7 @@ export function PerformanceGrid({ fund, data, showForecast, onToggleForecast }: 
             <div className="max-w-sm px-6">
               <p className="text-[13px] font-semibold text-body">No actuals yet</p>
               <p className="mt-1 text-[12px] text-muted">
-                Add this fund's quarterly data on the Actuals screen, or toggle{' '}
+                Add quarterly actuals on the Actuals screen, or toggle{' '}
                 <span className="font-medium">Show forecast</span> to see the underwriting plan.
               </p>
             </div>

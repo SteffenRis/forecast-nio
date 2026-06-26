@@ -218,7 +218,26 @@ function forecastPortfolio(pf: Portfolio, refs: FundRef[]): PortfolioForecastRes
   for (const r of refs) deps.push(r.fund, r.template)
   const hit = portfolioCache.get(pf.id)
   if (hit && depsEqual(hit.deps, deps)) return hit.result
-  const result = runPortfolioForecast(toPortfolioInput(pf, refs))
+  // The engine throws on a hard failure (e.g. a missing FX rate for a fund in a
+  // currency other than the portfolio's — §11). Catch it into a blocking warning
+  // so a render never crashes; the screen reads `warnings` to explain the gap.
+  let result: PortfolioForecastResult
+  try {
+    result = runPortfolioForecast(toPortfolioInput(pf, refs))
+  } catch (e) {
+    result = {
+      portfolioId: pf.id,
+      quarters: [],
+      scenarios: [],
+      fundResults: [],
+      warnings: [
+        {
+          code: 'portfolio_forecast_failed',
+          message: e instanceof Error ? e.message : String(e),
+        },
+      ],
+    }
+  }
   portfolioCache.set(pf.id, { deps, result })
   return result
 }

@@ -117,6 +117,130 @@ export function buildFundComparison(input: {
   }))
 }
 
+/** One underlying fund's contribution to a portfolio roll-up: its own
+ *  plan-vs-actual comparison (in the fund's currency, at full fund scale) and the
+ *  factor that scales it to this portfolio's share + reporting currency
+ *  (= allocatedCommitment / fund.commitment × FX). */
+export interface PortfolioFundComparison {
+  comparison: QuarterComparison[]
+  factor: number
+}
+
+type CumulativeSide = {
+  contributed: number
+  distributed: number
+  nav: number
+  recallable: number | null
+}
+
+const scaleSide = (a: QuarterAmounts, factor: number): CumulativeSide => ({
+  contributed: a.contributed * factor,
+  distributed: a.distributed * factor,
+  nav: a.nav * factor,
+  recallable: a.recallable === null ? null : a.recallable * factor,
+})
+
+/** The latest cumulative side at or before `ord` (carry-forward). Cumulative series
+ *  sampled at different quarters per fund must be carried forward to aggregate: a
+ *  fund's value at quarter Q is its most recent reading ≤ Q. `series` is ord-sorted. */
+function carryForward(series: { ord: number; side: CumulativeSide }[], ord: number): CumulativeSide | null {
+  let res: CumulativeSide | null = null
+  for (const e of series) {
+    if (e.ord <= ord) res = e.side
+    else break
+  }
+  return res
+}
+
+/** Aggregate underlying funds' plan-vs-actual comparisons into the portfolio's, on
+ *  the union calendar grid. Each fund's cumulative amounts are scaled by its factor
+ *  and summed with carry-forward (so funds reporting on different quarters still add
+ *  up correctly); portfolio multiples are recomputed from the aggregated cumulatives
+ *  against `totalCommitment` (the included funds' allocated commitment, reporting ccy). */
+export function buildPortfolioComparison(input: {
+  totalCommitment: number
+  funds: PortfolioFundComparison[]
+}): QuarterComparison[] {
+  const { totalCommitment, funds } = input
+
+  const quarterByOrd = new Map<number, CalendarQuarterRef>()
+  const planSeries: { ord: number; side: CumulativeSide }[][] = []
+  const actualSeries: { ord: number; side: CumulativeSide }[][] = []
+
+  // The actuals horizon ends at the latest quarter ANY fund has reported. Within it,
+  // funds reporting on earlier quarters are carried forward; beyond it there's no
+  // actual data, so the roll-up shows plan only (never an actual extrapolated past
+  // the last real reading).
+  let maxActualOrd = -Infinity
+
+  for (const f of funds) {
+    const plan: { ord: number; side: CumulativeSide }[] = []
+    const actual: { ord: number; side: CumulativeSide }[] = []
+    for (const c of f.comparison) {
+      const ord = quarterOrdinal(c.quarter)
+      quarterByOrd.set(ord, c.quarter)
+      if (c.forecast) plan.push({ ord, side: scaleSide(c.forecast, f.factor) })
+      if (c.actual) {
+        actual.push({ ord, side: scaleSide(c.actual, f.factor) })
+        if (ord > maxActualOrd) maxActualOrd = ord
+      }
+    }
+    plan.sort((a, b) => a.ord - b.ord)
+    actual.sort((a, b) => a.ord - b.ord)
+    planSeries.push(plan)
+    actualSeries.push(actual)
+  }
+
+  const toAmounts = (s: CumulativeSide): QuarterAmounts => ({
+    contributed: s.contributed,
+    distributed: s.distributed,
+    recallable: s.recallable,
+    nav: s.nav,
+    multiples: fundMultiples({
+      commitment: totalCommitment,
+      paidIn: s.contributed,
+      distributed: s.distributed,
+      nav: s.nav,
+    }),
+  })
+
+  const ords = [...quarterByOrd.keys()].sort((a, b) => a - b)
+  return ords.map((ord) => {
+    let planHas = false
+    const plan: CumulativeSide = { contributed: 0, distributed: 0, nav: 0, recallable: null }
+    for (const s of planSeries) {
+      const v = carryForward(s, ord)
+      if (v) {
+        planHas = true
+        plan.contributed += v.contributed
+        plan.distributed += v.distributed
+        plan.nav += v.nav
+      }
+    }
+
+    let actualHas = false
+    const actual: CumulativeSide = { contributed: 0, distributed: 0, nav: 0, recallable: null }
+    if (ord <= maxActualOrd) {
+      for (const s of actualSeries) {
+        const v = carryForward(s, ord)
+        if (v) {
+          actualHas = true
+          actual.contributed += v.contributed
+          actual.distributed += v.distributed
+          actual.nav += v.nav
+          if (v.recallable !== null) actual.recallable = (actual.recallable ?? 0) + v.recallable
+        }
+      }
+    }
+
+    return {
+      quarter: quarterByOrd.get(ord)!,
+      actual: actualHas ? toAmounts(actual) : null,
+      forecast: planHas ? toAmounts(plan) : null,
+    }
+  })
+}
+
 /** Per-field Actual − Forecast. `recallable` is always null (never on the plan);
  *  a multiple delta is null when either side is null (n.a.). */
 export interface QuarterDeviation {
