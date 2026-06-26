@@ -6,6 +6,7 @@ import { FundsPage } from '@/routes/funds/FundsPage'
 import { ActualsPage } from '@/routes/actuals/ActualsPage'
 import { ImportActualsPage } from '@/routes/actuals/import/ImportActualsPage'
 import { PerformancePage } from '@/routes/performance/PerformancePage'
+import { ExchangeRatesPage } from '@/routes/exchange-rates/ExchangeRatesPage'
 import { SettingsPage } from '@/routes/settings/SettingsPage'
 
 export const router = createBrowserRouter([
@@ -20,6 +21,7 @@ export const router = createBrowserRouter([
       { path: 'actuals', element: <ActualsPage /> },
       { path: 'actuals/import', element: <ImportActualsPage /> },
       { path: 'performance', element: <PerformancePage /> },
+      { path: 'exchange-rates', element: <ExchangeRatesPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],
   },

@@ -1,4 +1,11 @@
-import { ClipboardList, Layers, LayoutTemplate, Settings, SquareChartGantt } from 'lucide-react'
+import {
+  ArrowRightLeft,
+  ClipboardList,
+  Layers,
+  LayoutTemplate,
+  Settings,
+  SquareChartGantt,
+} from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export interface NavEntry {
@@ -65,6 +72,15 @@ export const NAV: NavEntry[] = [
     hidden: true,
     title: 'Actuals',
     sub: 'Upload realized contributions, distributions and NAV, quarter by quarter.',
+  },
+  {
+    id: 'exchange-rates',
+    label: 'Exchange Rates',
+    icon: ArrowRightLeft,
+    route: '/exchange-rates',
+    group: 'top',
+    title: 'Exchange Rates',
+    sub: 'Pull market FX rates from frankfurter.dev for the currency pairs and dates your funds and portfolios actually use.',
   },
   {
     id: 'settings',

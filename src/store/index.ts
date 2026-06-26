@@ -7,6 +7,7 @@ import { createTemplatesSlice } from './slices/templatesSlice'
 import { createFundsSlice } from './slices/fundsSlice'
 import { createPortfoliosSlice } from './slices/portfoliosSlice'
 import { createSettingsSlice } from './slices/settingsSlice'
+import { createFxRatesSlice } from './slices/fxRatesSlice'
 import { createUiSlice } from './slices/uiSlice'
 import {
   PERSIST_NAME,
@@ -29,6 +30,7 @@ export const useStore = create<StoreState>()(
       ...createFundsSlice(...a),
       ...createPortfoliosSlice(...a),
       ...createSettingsSlice(...a),
+      ...createFxRatesSlice(...a),
       ...createUiSlice(...a),
     })),
     {
@@ -87,5 +89,6 @@ export function clearAllData(): void {
     fundOrder: [],
     portfolios: {},
     portfolioOrder: [],
+    fxRates: {},
   })
 }

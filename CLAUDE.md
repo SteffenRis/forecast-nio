@@ -13,7 +13,9 @@ Non-negotiable conventions:
 1. **Store holds raw INPUTS only** — never a computed curve, fee, IRR, or aggregate.
 2. **Derived numbers come from `src/engine/`** (pure) via **memoized selectors** in
    `src/store/selectors/`. Components never call the engine in render.
-3. **No fetching, ever** — no `react-query`/`swr`/`axios`/`useEffect(fetch)`.
+3. **No fetching, ever** — no `react-query`/`swr`/`axios`/`useEffect(fetch)`. One
+   carve-out: the frankfurter.dev FX pull (`src/lib/fx/frankfurter.ts`) — user-click
+   only, external reference data, written to the store as raw inputs. See ARCHITECTURE.md §3.
 4. **Persist** to localStorage (autosave) **+ JSON export/import** (the document).
 5. **Engine is referentially transparent** — pure, no `Date.now()`/randomness/I/O,
    never mutates inputs, JSON-serializable public surface (Web-Worker-ready).
