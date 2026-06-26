@@ -55,7 +55,8 @@ export interface PortfolioResult {
   quarters: CalendarQuarter[];
 }
 
-/** §11 FX with auto-inversion; throws (collected as blocking warning) if missing. */
+/** §11 FX with auto-inversion; throws (collected as blocking warning) if missing.
+ *  This is the flat-rate fallback honoured when no time-varying rates are supplied. */
 export function fxRate(
   fx: PortfolioInput['fx'],
   from: string,
@@ -75,6 +76,57 @@ export function fxRate(
   }
   pushWarning(warnings, 'fx_rate_missing', `Missing FX ${from}->${to}.`, { from, to });
   throw new Error(`FXRateMissing: ${from}->${to}`);
+}
+
+/** Time-aware §11 FX. Actuals quarters (ordinal ≤ lastActualOrd) convert at their own
+ *  `periodRates` rate (carrying the nearest earlier observation forward across gaps);
+ *  forecast quarters convert at `forecastRates`. Anything unresolved falls through to
+ *  the flat `fxRate` fallback, so a flat-only FxTable behaves exactly as before. */
+export function fxRateAt(
+  fx: PortfolioInput['fx'],
+  from: string,
+  to: string,
+  quarter: CalendarQuarter,
+  lastActualOrd: number,
+  warnings: Warning[],
+): number {
+  if (from === to) return 1;
+  const pair = `${from}->${to}`;
+  const ord = calQuarterOrdinal(quarter);
+  if (ord <= lastActualOrd) {
+    const m = fx.periodRates?.[pair];
+    if (m) {
+      const exact = m[ord];
+      if (exact !== undefined) return exact;
+      // Carry forward the most recent observation on or before this quarter.
+      let bestOrd = -Infinity;
+      let bestRate: number | undefined;
+      for (const k in m) {
+        const ko = Number(k);
+        if (ko <= ord && ko > bestOrd) {
+          bestOrd = ko;
+          bestRate = m[ko];
+        }
+      }
+      if (bestRate !== undefined) return bestRate;
+    }
+  }
+  const forecast = fx.forecastRates?.[pair];
+  if (forecast !== undefined) return forecast;
+  return fxRate(fx, from, to, warnings);
+}
+
+/** The single forecast/go-forward rate for a pair (PIC commitment denominator). */
+export function fxForecastRate(
+  fx: PortfolioInput['fx'],
+  from: string,
+  to: string,
+  warnings: Warning[],
+): number {
+  if (from === to) return 1;
+  const forecast = fx.forecastRates?.[`${from}->${to}`];
+  if (forecast !== undefined) return forecast;
+  return fxRate(fx, from, to, warnings);
 }
 
 function emptyItem(): PortfolioLineItem {
@@ -137,12 +189,26 @@ export function runPortfolio(portfolio: PortfolioInput): PortfolioResult {
       const sc = fr.scenarios.find((s) => s.scenarioId === scId);
       if (!sc) continue;
       const pr = fref.allocatedCommitment / fref.fund.commitment;
-      const rate = fxRate(portfolio.fx, fref.fund.currency, portfolio.currency, warnings);
-      const factor = pr * rate;
+      // §11 time-varying FX: actuals quarters convert at their historical rate,
+      // forecast quarters at the forecast rate. The split is the fund's last
+      // actuals quarter; with no actuals every quarter is treated as forecast.
+      const lastActualOrd = (fref.fund.actuals ?? []).reduce(
+        (m, a) => Math.max(m, calQuarterOrdinal(a.quarter)),
+        -Infinity,
+      );
 
       for (const row of sc.rows) {
         const idx = ordToIndex.get(calQuarterOrdinal(row.quarter));
         if (idx === undefined) continue;
+        const rate = fxRateAt(
+          portfolio.fx,
+          fref.fund.currency,
+          portfolio.currency,
+          row.quarter,
+          lastActualOrd,
+          warnings,
+        );
+        const factor = pr * rate;
         const it = items[idx];
         it.pNet += row.pNet * factor;
         it.dNet += row.dNet * factor;
@@ -180,7 +246,7 @@ export function runPortfolio(portfolio: PortfolioInput): PortfolioResult {
       } else {
         denom = 0;
         for (const fref of portfolio.funds) {
-          const rate = fxRate(
+          const rate = fxForecastRate(
             portfolio.fx,
             fref.fund.currency,
             portfolio.currency,

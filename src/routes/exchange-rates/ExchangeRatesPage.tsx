@@ -3,8 +3,11 @@ import { ArrowRightLeft, Loader2, RefreshCw, TriangleAlert } from 'lucide-react'
 import { useStore } from '@/store'
 import { cn } from '@/lib/cn'
 import { RoutePlaceholder } from '@/components/common/RoutePlaceholder'
+import { NumberInput } from '@/components/common/NumberInput'
 import { deriveNeededFxRequests, summarizeNeededFx } from '@/store/selectors/fxNeeded'
+import { pulledRateKey } from '@/store/slices/fxRatesSlice'
 import { fetchRates } from '@/lib/fx/frankfurter'
+import type { PulledRate } from '@/store/types'
 
 const primaryBtn =
   'inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-navy px-3 py-2 text-[13px] font-semibold text-white hover:opacity-90 disabled:opacity-40'
@@ -25,12 +28,44 @@ export function ExchangeRatesPage() {
   const funds = useStore((s) => s.funds)
   const portfolios = useStore((s) => s.portfolios)
   const fxRates = useStore((s) => s.fxRates)
+  const forecastRates = useStore((s) => s.forecastRates)
   const setPulledRates = useStore((s) => s.setPulledRates)
   const clearPulledRates = useStore((s) => s.clearPulledRates)
+  const setForecastRate = useStore((s) => s.setForecastRate)
 
   // Scope: only the (pair, date) combinations the system actually references.
   const requests = useMemo(() => deriveNeededFxRequests(funds, portfolios), [funds, portfolios])
   const summary = useMemo(() => summarizeNeededFx(requests), [requests])
+
+  // Distinct base→quote pairs in the system (for the forecast-rate editor).
+  const pairList = useMemo(() => {
+    const seen = new Map<string, { base: string; quote: string }>()
+    for (const r of requests) {
+      for (const q of r.quotes) seen.set(`${r.base}>${q}`, { base: r.base, quote: q })
+    }
+    return [...seen.values()].sort((a, b) =>
+      `${a.base}${a.quote}`.localeCompare(`${b.base}${b.quote}`),
+    )
+  }, [requests])
+
+  // Most recent pulled rate per pair = the forecast default.
+  const latestByPair = useMemo(() => {
+    const m: Record<string, PulledRate> = {}
+    for (const r of Object.values(fxRates)) {
+      const k = `${r.base}>${r.quote}`
+      if (!m[k] || r.date > m[k].date) m[k] = r
+    }
+    return m
+  }, [fxRates])
+
+  // Needed (pair, date) rates that haven't been pulled yet — the D2 gap nudge.
+  const missingCount = useMemo(() => {
+    let n = 0
+    for (const r of requests) {
+      for (const q of r.quotes) if (!fxRates[pulledRateKey(r.base, q, r.date)]) n++
+    }
+    return n
+  }, [requests, fxRates])
 
   const rows = useMemo(
     () =>
@@ -129,6 +164,14 @@ export function ExchangeRatesPage() {
               pair{summary.pairs.length === 1 ? '' : 's'} and {summary.dates.length} date
               {summary.dates.length === 1 ? '' : 's'}, derived from your funds and portfolios.
             </p>
+            {missingCount > 0 && (
+              <p className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-amber-700">
+                <TriangleAlert className="size-3.5" strokeWidth={2.25} />
+                {missingCount} historical rate{missingCount === 1 ? '' : 's'} for your actuals
+                {missingCount === 1 ? " hasn't" : " haven't"} been pulled — portfolio actuals fall
+                back to the nearest known or forecast rate until you pull.
+              </p>
+            )}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
@@ -158,6 +201,73 @@ export function ExchangeRatesPage() {
           </>
         )}
       </div>
+
+      {/* Forecast rate — applied to forecast quarters at the portfolio level. */}
+      {pairList.length > 0 && (
+        <div className={cn(card, 'mt-5')}>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Forecast rate
+          </h3>
+          <p className="mt-1.5 text-[13px] text-muted">
+            The rate used to convert <span className="font-medium text-body">forecast</span>{' '}
+            quarters in portfolio roll-ups. Defaults to the most recent pulled date; override a
+            pair to model a different go-forward rate. Historical actuals always convert at their
+            own quarter's rate.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full border-separate border-spacing-0 text-[13px]">
+              <thead>
+                <tr className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="pb-2 pr-3 text-left font-semibold">Pair</th>
+                  <th className="px-3 pb-2 text-left font-semibold">Default (latest pull)</th>
+                  <th className="px-3 pb-2 text-left font-semibold">Forecast rate</th>
+                  <th className="w-16 pb-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {pairList.map(({ base, quote }) => {
+                  const key = `${base}>${quote}`
+                  const override = forecastRates[key]
+                  const latest = latestByPair[key]
+                  return (
+                    <tr key={key} className="border-t border-border-subtle">
+                      <td className="py-1.5 pr-3 text-left font-medium text-body">
+                        {base}
+                        <span className="text-slate-400"> → </span>
+                        {quote}
+                      </td>
+                      <td className="px-3 py-1.5 text-left tabular-nums text-muted">
+                        {latest ? `${fmtRate(latest.rate)} (as of ${latest.date})` : 'not pulled yet'}
+                      </td>
+                      <td className="w-40 px-3 py-1.5">
+                        <NumberInput
+                          value={override}
+                          onCommit={(v) => setForecastRate(base, quote, v)}
+                          placeholder={latest ? fmtRate(latest.rate) : '—'}
+                          decimals={4}
+                          align="left"
+                          ariaLabel={`Forecast rate ${base} to ${quote}`}
+                        />
+                      </td>
+                      <td className="px-3 py-1.5 text-left">
+                        {override !== undefined && (
+                          <button
+                            type="button"
+                            className="text-[12px] text-muted underline-offset-2 hover:text-body hover:underline"
+                            onClick={() => setForecastRate(base, quote, null)}
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Status + errors. */}
       {status && (

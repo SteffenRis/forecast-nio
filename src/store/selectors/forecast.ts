@@ -26,8 +26,10 @@ import type {
   Fund,
   OverlayParams as StoreOverlay,
   Portfolio,
+  PulledRate,
   Template,
 } from '../types'
+import { quarterOfIso, quarterOrdinal } from '@/lib/quarter'
 
 // ---- mapping: store entities → engine JSON inputs ------------------------
 
@@ -107,13 +109,48 @@ function toFundInput(f: Fund, t: Template): FundInputJSON {
   }
 }
 
-function toFxTable(fx: Record<string, number>): FxTable {
+/** Build the engine FxTable from three layers (low → high precedence per quarter):
+ *  - `rates`: the portfolio's manual flat rates (last-resort fallback).
+ *  - `periodRates`: pulled rates indexed by calendar-quarter ordinal — the historical
+ *    rate used for actuals quarters (latest date within a quarter wins, so an actuals
+ *    quarter-end rate beats an effective-date rate in the same quarter).
+ *  - `forecastRates`: the go-forward rate per pair — a user override if set, else the
+ *    most recent pulled date's rate. Used for forecast quarters + the PIC denominator. */
+export function buildFxTable(
+  pf: Portfolio,
+  pulled: Record<string, PulledRate>,
+  overrides: Record<string, number>,
+): FxTable {
   const rates: Record<string, number> = {}
-  for (const [key, value] of Object.entries(fx)) {
+  for (const [key, value] of Object.entries(pf.fx)) {
     const [from, to] = key.split('>')
     if (from && to) rates[`${from}->${to}`] = value
   }
-  return { rates }
+
+  const periodRates: Record<string, Record<number, number>> = {}
+  const bestPeriodDate: Record<string, Record<number, string>> = {}
+  const latestByPair: Record<string, { date: string; rate: number }> = {}
+  for (const r of Object.values(pulled)) {
+    const pair = `${r.base}->${r.quote}`
+    const ord = quarterOrdinal(quarterOfIso(r.date))
+    const pdates = (bestPeriodDate[pair] ??= {})
+    const prates = (periodRates[pair] ??= {})
+    if (pdates[ord] === undefined || r.date > pdates[ord]) {
+      pdates[ord] = r.date
+      prates[ord] = r.rate
+    }
+    const cur = latestByPair[pair]
+    if (!cur || r.date > cur.date) latestByPair[pair] = { date: r.date, rate: r.rate }
+  }
+
+  const forecastRates: Record<string, number> = {}
+  for (const pair in latestByPair) forecastRates[pair] = latestByPair[pair].rate
+  for (const [key, value] of Object.entries(overrides)) {
+    const [from, to] = key.split('>')
+    if (from && to) forecastRates[`${from}->${to}`] = value
+  }
+
+  return { rates, periodRates, forecastRates }
 }
 
 function toOverlay(o: StoreOverlay): OverlayParams {
@@ -162,7 +199,12 @@ interface FundRef {
   allocatedCommitment: number
 }
 
-function toPortfolioInput(pf: Portfolio, refs: FundRef[]): PortfolioInputJSON {
+function toPortfolioInput(
+  pf: Portfolio,
+  refs: FundRef[],
+  pulled: Record<string, PulledRate>,
+  overrides: Record<string, number>,
+): PortfolioInputJSON {
   const earliestEffective =
     refs.map((r) => r.fund.effectiveDate).sort()[0] ?? pf.effectiveDate ?? '2024-01-01'
   return {
@@ -176,7 +218,7 @@ function toPortfolioInput(pf: Portfolio, refs: FundRef[]): PortfolioInputJSON {
       fund: toFundInput(r.fund, r.template),
       allocatedCommitment: r.allocatedCommitment,
     })),
-    fx: toFxTable(pf.fx),
+    fx: buildFxTable(pf, pulled, overrides),
     overlay: pf.overlay ? toOverlay(pf.overlay) : disabledOverlay(),
     isFoF: pf.overlay != null,
   }
@@ -227,8 +269,14 @@ function forecastFundBaseline(f: Fund, t: Template): FundForecastResult {
   return result
 }
 
-function forecastPortfolio(pf: Portfolio, refs: FundRef[]): PortfolioForecastResult {
-  const deps: unknown[] = [pf]
+function forecastPortfolio(
+  pf: Portfolio,
+  refs: FundRef[],
+  pulled: Record<string, PulledRate>,
+  overrides: Record<string, number>,
+): PortfolioForecastResult {
+  // FX depends on the global pulled rates + overrides, so they join the memo deps.
+  const deps: unknown[] = [pf, pulled, overrides]
   for (const r of refs) deps.push(r.fund, r.template)
   const hit = portfolioCache.get(pf.id)
   if (hit && depsEqual(hit.deps, deps)) return hit.result
@@ -237,7 +285,7 @@ function forecastPortfolio(pf: Portfolio, refs: FundRef[]): PortfolioForecastRes
   // so a render never crashes; the screen reads `warnings` to explain the gap.
   let result: PortfolioForecastResult
   try {
-    result = runPortfolioForecast(toPortfolioInput(pf, refs))
+    result = runPortfolioForecast(toPortfolioInput(pf, refs, pulled, overrides))
   } catch (e) {
     result = {
       portfolioId: pf.id,
@@ -300,7 +348,7 @@ export function selectPortfolioForecast(
     if (!template) continue
     refs.push({ fund, template, allocatedCommitment: alloc.allocatedCommitment })
   }
-  return forecastPortfolio(pf, refs)
+  return forecastPortfolio(pf, refs, s.fxRates, s.forecastRates)
 }
 
 // ---- React hooks ---------------------------------------------------------

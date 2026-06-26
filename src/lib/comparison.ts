@@ -123,7 +123,12 @@ export function buildFundComparison(input: {
  *  (= allocatedCommitment / fund.commitment × FX). */
 export interface PortfolioFundComparison {
   comparison: QuarterComparison[]
-  factor: number
+  /** Constant pro-rata × FX factor (flat-rate path). */
+  factor?: number
+  /** Per-quarter pro-rata × FX factor (time-varying FX); takes precedence over `factor`.
+   *  Receives the calendar-quarter ordinal so actuals/forecast quarters can convert at
+   *  different rates. */
+  factorForOrd?: (ord: number) => number
 }
 
 type CumulativeSide = {
@@ -174,14 +179,15 @@ export function buildPortfolioComparison(input: {
   let maxActualOrd = -Infinity
 
   for (const f of funds) {
+    const factorAt = f.factorForOrd ?? (() => f.factor ?? 1)
     const plan: { ord: number; side: CumulativeSide }[] = []
     const actual: { ord: number; side: CumulativeSide }[] = []
     for (const c of f.comparison) {
       const ord = quarterOrdinal(c.quarter)
       quarterByOrd.set(ord, c.quarter)
-      if (c.forecast) plan.push({ ord, side: scaleSide(c.forecast, f.factor) })
+      if (c.forecast) plan.push({ ord, side: scaleSide(c.forecast, factorAt(ord)) })
       if (c.actual) {
-        actual.push({ ord, side: scaleSide(c.actual, f.factor) })
+        actual.push({ ord, side: scaleSide(c.actual, factorAt(ord)) })
         if (ord > maxActualOrd) maxActualOrd = ord
       }
     }
