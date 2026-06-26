@@ -11,10 +11,12 @@ import {
 } from '@/lib/csv/columnMapping'
 import { autoMatchFund, type FundMatch } from '@/lib/csv/matchFunds'
 import { buildImportPreview, mergeActualsByQuarter } from '@/lib/csv/buildActuals'
+import { applyRowEdits, type EditableField, type RowEdits } from '@/lib/csv/applyEdits'
 import { FUND_SKIP, type FundNameMapping, type FundTarget } from '@/lib/csv/types'
 import { Stepper } from './Stepper'
 import { StepUpload } from './StepUpload'
 import { StepMap } from './StepMap'
+import { StepEdit } from './StepEdit'
 import { StepConfirm } from './StepConfirm'
 
 const EMPTY_MAPPING: ColumnMapping = {
@@ -41,12 +43,14 @@ export function ImportActualsPage() {
   const setFundActuals = useStore((s) => s.setFundActuals)
   const select = useStore((s) => s.select)
 
-  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
   const [fileName, setFileName] = useState<string | null>(null)
   const [parsed, setParsed] = useState<ParsedCsv | null>(null)
   const [parseError, setParseError] = useState<string | null>(null)
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>(EMPTY_MAPPING)
   const [fundOverrides, setFundOverrides] = useState<Record<string, FundTarget>>({})
+  // Per-row, per-field value corrections made on the Edit step (keyed by CSV row index).
+  const [edits, setEdits] = useState<RowEdits>({})
 
   const systemFunds = useMemo(
     () =>
@@ -55,6 +59,11 @@ export function ImportActualsPage() {
         .filter(Boolean)
         .map((f) => ({ id: f.id, name: f.name, gpName: f.gpName })),
     [fundsRec, fundOrder],
+  )
+
+  const fundNameById = useMemo(
+    () => Object.fromEntries(systemFunds.map((f) => [f.id, f.name])),
+    [systemFunds],
   )
 
   const existingActualsByFundId = useMemo(
@@ -102,22 +111,30 @@ export function ImportActualsPage() {
     return out
   }, [distinctNames, fundOverrides, autoMatchByName])
 
+  // The Edit step's corrections re-written into the parsed cells. buildImportPreview then
+  // re-parses from this, so the Edit and Confirm screens share one recomputed preview.
+  const effectiveParsed = useMemo(
+    () => (parsed ? applyRowEdits(parsed, edits, columnMapping) : null),
+    [parsed, edits, columnMapping],
+  )
+
   const preview = useMemo(() => {
-    if (!parsed) return null
+    if (!effectiveParsed) return null
     return buildImportPreview({
-      parsed,
+      parsed: effectiveParsed,
       columnMapping,
       fundNameMapping,
       funds: systemFunds,
       existingActualsByFundId,
     })
-  }, [parsed, columnMapping, fundNameMapping, systemFunds, existingActualsByFundId])
+  }, [effectiveParsed, columnMapping, fundNameMapping, systemFunds, existingActualsByFundId])
 
   const columnsComplete = isColumnMappingComplete(columnMapping)
 
   function onText(name: string, text: string) {
     setFileName(name)
     setFundOverrides({})
+    setEdits({}) // row-indexed edits are tied to this file's rows; a new file invalidates them.
     if (text === '') {
       setParsed(null)
       setParseError('Could not read the file.')
@@ -148,6 +165,10 @@ export function ImportActualsPage() {
 
   function onFundChange(name: string, target: FundTarget) {
     setFundOverrides((prev) => ({ ...prev, [name]: target }))
+  }
+
+  function onEditCell(rowIndex: number, field: EditableField, value: string) {
+    setEdits((prev) => ({ ...prev, [rowIndex]: { ...prev[rowIndex], [field]: value } }))
   }
 
   function onConfirm() {
@@ -214,8 +235,21 @@ export function ImportActualsPage() {
         />
       )}
 
-      {step === 3 && preview && (
-        <StepConfirm preview={preview} onBack={() => setStep(2)} onConfirm={onConfirm} />
+      {step === 3 && effectiveParsed && preview && (
+        <StepEdit
+          rows={effectiveParsed.rows}
+          mapping={columnMapping}
+          outcomes={preview.rows}
+          recallableMapped={columnMapping.recallable !== null}
+          fundNameById={fundNameById}
+          onEditCell={onEditCell}
+          onBack={() => setStep(2)}
+          onContinue={() => setStep(4)}
+        />
+      )}
+
+      {step === 4 && preview && (
+        <StepConfirm preview={preview} onBack={() => setStep(3)} onConfirm={onConfirm} />
       )}
     </RoutePlaceholder>
   )
