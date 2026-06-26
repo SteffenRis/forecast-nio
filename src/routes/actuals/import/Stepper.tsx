@@ -1,10 +1,10 @@
 import { Check } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
-const STEPS = ['Upload', 'Map', 'Confirm'] as const
+const STEPS = ['Upload', 'Map', 'Edit', 'Confirm'] as const
 
-/** Linear 1·2·3 progress indicator for the import wizard. `current` is 1-based. */
-export function Stepper({ current }: { current: 1 | 2 | 3 }) {
+/** Linear 1·2·3·4 progress indicator for the import wizard. `current` is 1-based. */
+export function Stepper({ current }: { current: 1 | 2 | 3 | 4 }) {
   return (
     <ol className="mt-5 flex items-center gap-2 text-[13px]">
       {STEPS.map((label, i) => {

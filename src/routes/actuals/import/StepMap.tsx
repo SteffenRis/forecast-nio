@@ -50,7 +50,7 @@ export function StepMap({
             <span className="text-[12px] text-negative">Map all required columns to continue.</span>
           )}
           <button type="button" className={btnPrimary} disabled={!canContinue} onClick={onContinue}>
-            Review numbers
+            Review &amp; edit
           </button>
         </div>
       </div>
