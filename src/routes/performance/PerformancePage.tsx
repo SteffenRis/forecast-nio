@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ClipboardList, SquareChartGantt } from 'lucide-react'
+import { ClipboardList, SquareChartGantt, Upload } from 'lucide-react'
 import { useStore } from '@/store'
 import { cn } from '@/lib/cn'
 import { useFundBaselineForecast } from '@/store/selectors/forecast'
@@ -71,15 +71,25 @@ export function PerformancePage() {
             Forecast) wherever an actual exists.
           </p>
         </div>
-        {fund && (
-          <KebabMenu
-            ariaLabel="Fund actions"
-            items={[
-              { label: 'Edit fund', icon: SquareChartGantt, onClick: () => openFor('/funds') },
-              { label: 'Actuals', icon: ClipboardList, onClick: () => openFor('/actuals') },
-            ]}
-          />
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/actuals/import')}
+            className="flex items-center gap-1.5 rounded-md border border-border-default bg-white px-3 py-2 text-[13px] font-medium text-body hover:bg-slate-50"
+          >
+            <Upload className="size-3.5" strokeWidth={2.25} />
+            Import CSV
+          </button>
+          {fund && (
+            <KebabMenu
+              ariaLabel="Fund actions"
+              items={[
+                { label: 'Edit fund', icon: SquareChartGantt, onClick: () => openFor('/funds') },
+                { label: 'Actuals', icon: ClipboardList, onClick: () => openFor('/actuals') },
+              ]}
+            />
+          )}
+        </div>
       </div>
 
       {fundOrder.length === 0 ? (

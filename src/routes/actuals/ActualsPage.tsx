@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Upload } from 'lucide-react'
 import { produce } from 'immer'
 import { useStore } from '@/store'
 import { cn } from '@/lib/cn'
@@ -13,6 +15,7 @@ const fieldCls =
 const cloneActuals = (a: ActualsRecord[]): ActualsRecord[] => structuredClone(a)
 
 export function ActualsPage() {
+  const navigate = useNavigate()
   const fundOrder = useStore((s) => s.fundOrder)
   const funds = useStore((s) => s.funds)
   const setFundActuals = useStore((s) => s.setFundActuals)
@@ -69,6 +72,14 @@ export function ActualsPage() {
             and NAV. The forecast anchors to your latest actual; edits stage below until you Save.
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => navigate('/actuals/import')}
+          className="flex shrink-0 items-center gap-1.5 rounded-md border border-border-default bg-white px-3 py-2 text-[13px] font-medium text-body hover:bg-slate-50"
+        >
+          <Upload className="size-3.5" strokeWidth={2.25} />
+          Import CSV
+        </button>
       </div>
 
       {fundOrder.length === 0 ? (
