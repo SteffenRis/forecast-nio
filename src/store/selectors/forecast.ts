@@ -5,10 +5,12 @@
 
 import {
   runFundForecast,
+  runFundFeeTrace,
   runPortfolioForecast,
   type ActualRecord,
   type FeeParams,
   type ForecastOverrides,
+  type FundFeeTrace,
   type FundForecastResult,
   type FundInputJSON,
   type FxTable,
@@ -230,6 +232,7 @@ function depsEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
 
 const fundCache = new Map<string, { deps: unknown[]; result: FundForecastResult }>()
 const baselineCache = new Map<string, { deps: unknown[]; result: FundForecastResult }>()
+const feeTraceCache = new Map<string, { deps: unknown[]; result: FundFeeTrace }>()
 const portfolioCache = new Map<string, { deps: unknown[]; result: PortfolioForecastResult }>()
 
 function forecastFund(f: Fund, t: Template): FundForecastResult {
@@ -238,6 +241,17 @@ function forecastFund(f: Fund, t: Template): FundForecastResult {
   if (hit && depsEqual(hit.deps, deps)) return hit.result
   const result = runFundForecast(toFundInput(f, t))
   fundCache.set(f.id, { deps, result })
+  return result
+}
+
+/** The fund's fee/carry calculation trace — per-quarter intermediates behind every
+ *  fee and carry figure, for the auditability drawer. Memoized like forecastFund. */
+function feeTraceFund(f: Fund, t: Template): FundFeeTrace {
+  const deps = [f, t]
+  const hit = feeTraceCache.get(f.id)
+  if (hit && depsEqual(hit.deps, deps)) return hit.result
+  const result = runFundFeeTrace(toFundInput(f, t))
+  feeTraceCache.set(f.id, { deps, result })
   return result
 }
 
@@ -300,6 +314,14 @@ export function selectFundForecast(s: StoreState, fundId: string): FundForecastR
   return forecastFund(fund, template)
 }
 
+export function selectFundFeeTrace(s: StoreState, fundId: string): FundFeeTrace | null {
+  const fund = s.funds[fundId]
+  if (!fund) return null
+  const template = s.templates[fund.templateId]
+  if (!template) return null
+  return feeTraceFund(fund, template)
+}
+
 /** The baseline plan (forecast with actuals stripped) — see forecastFundBaseline. */
 export function selectFundBaselineForecast(
   s: StoreState,
@@ -334,6 +356,11 @@ export function selectPortfolioForecast(
 /** Memoized fund forecast — stable reference while inputs are unchanged. */
 export function useFundForecast(fundId: string): FundForecastResult | null {
   return useStore((s) => selectFundForecast(s, fundId))
+}
+
+/** Memoized fee/carry calculation trace (for the auditability drawer). */
+export function useFundFeeTrace(fundId: string): FundFeeTrace | null {
+  return useStore((s) => selectFundFeeTrace(s, fundId))
 }
 
 /** Memoized baseline plan (forecast with actuals stripped). */

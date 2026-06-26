@@ -7,6 +7,8 @@ import { useFundBaselineForecast } from '@/store/selectors/forecast'
 import { buildFundComparison } from '@/lib/comparison'
 import { RoutePlaceholder } from '@/components/common/RoutePlaceholder'
 import { KebabMenu } from '@/components/common/KebabMenu'
+import { Tabs } from '@/components/common/Tabs'
+import { FundFeesOverview } from '@/routes/funds/FundFeesOverview'
 import { PerformanceGrid } from './PerformanceGrid'
 
 const fieldCls =
@@ -29,6 +31,7 @@ export function PerformancePage() {
 
   // View preference: persists across fund switches (read-only page, no draft state).
   const [showForecast, setShowForecast] = useState(false)
+  const [tab, setTab] = useState<'performance' | 'fees'>('performance')
 
   const effectiveId = fundOrder.includes(activeId) ? activeId : (fundOrder[0] ?? '')
   const fund = effectiveId ? funds[effectiveId] : undefined
@@ -66,9 +69,9 @@ export function PerformancePage() {
         <div>
           <h2 className="text-xl font-bold tracking-[-0.02em]">Funds</h2>
           <p className="mt-1 max-w-2xl text-[13px] text-muted">
-            Compare each quarter's realized actuals against the original plan. Toggle the forecast
-            to reveal the underwriting plan across the fund's life and the deviation (Actual −
-            Forecast) wherever an actual exists.
+            {tab === 'performance'
+              ? "Compare each quarter's realized actuals against the original plan. Toggle the forecast to reveal the underwriting plan across the fund's life and the deviation (Actual − Forecast) wherever an actual exists."
+              : 'Management fees, expenses, establishment and carried interest for this fund — lifetime totals and an annual breakdown. Click any number to trace its calculation.'}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -126,15 +129,29 @@ export function PerformancePage() {
             </select>
           </div>
 
-          {fund && (
+          <div className="mt-4">
+            <Tabs
+              ariaLabel="Fund view"
+              tabs={[
+                { id: 'performance', label: 'Plan vs actual' },
+                { id: 'fees', label: 'Fees' },
+              ]}
+              value={tab}
+              onChange={setTab}
+            />
+          </div>
+
+          {fund && tab === 'performance' && (
             <PerformanceGrid
               key={fund.id}
               currency={fund.currency}
               data={data}
               showForecast={showForecast}
               onToggleForecast={setShowForecast}
+              commitment={fund.commitment}
             />
           )}
+          {fund && tab === 'fees' && <FundFeesOverview fundId={effectiveId} dirty={false} />}
         </>
       )}
     </RoutePlaceholder>

@@ -19,6 +19,72 @@ import { computeHurdleCarry } from './hurdleCarry';
 import { xirr } from './irr';
 import { calQuarterOrdinal } from './util/daycount';
 
+/** The per-scenario inputs to the row/IRR assembly (and the trace view): the
+ *  pipeline → cashflows → costBasis → feeBridge → hurdleCarry chain, computed once.
+ *  Shared by runFund and the fee-trace builder so the two can never drift. */
+export interface ScenarioPrimitives {
+  quarters: ReturnType<typeof runPipeline>['scenarios'][number]['quarters'];
+  n: number;
+  lastActualIndex: number;
+  cf: ReturnType<typeof computeCashflows>;
+  costBasis: Money[];
+  feeBridge: ReturnType<typeof computeFeeBridgeInception>;
+  hc: ReturnType<typeof computeHurdleCarry>;
+}
+
+export function computeScenarioPrimitives(
+  fund: FundInput,
+  sc: ReturnType<typeof runPipeline>['scenarios'][number],
+  effLiq: Date,
+  lastActualOrd: number,
+  warnings: Warning[],
+): ScenarioPrimitives {
+  const quarters = sc.quarters; // calendar quarter per inception index
+  const n = quarters.length;
+  const lastActualIndex =
+    lastActualOrd >= 0
+      ? quarters.findIndex((q) => calQuarterOrdinal(q) === lastActualOrd)
+      : -1;
+
+  const cf = computeCashflows({
+    scenarioId: sc.scenarioId,
+    quarters,
+    pic: sc.pic,
+    dpi: sc.dpi,
+    tvpi: sc.tvpi,
+    commitment: fund.commitment,
+    warnings,
+    status: fund.status,
+    lastActualIndex,
+  });
+
+  const costBasis = computeCostBasis(cf.P, cf.D, sc.terminalTvpi, warnings, sc.scenarioId);
+
+  const feeBridge = computeFeeBridgeInception({
+    nInc: n,
+    P: cf.P,
+    NAV: cf.NAV,
+    costBasis,
+    commitment: fund.commitment,
+    effectiveDate: fund.effectiveDate,
+    investmentPeriodEnd: fund.investmentPeriodEnd,
+    effLiq,
+    fees: fund.fees,
+  });
+
+  const hc = computeHurdleCarry({
+    p: cf.p,
+    d: cf.d,
+    P: cf.P,
+    D: cf.D,
+    hurdleAnnual: fund.fees.hurdleAnnual,
+    carryRate: fund.fees.carryRate,
+    catchUp: fund.fees.catchUp,
+  });
+
+  return { quarters, n, lastActualIndex, cf, costBasis, feeBridge, hc };
+}
+
 export function runFund(fund: FundInput): FundResult {
   const warnings: Warning[] = [];
   const pipeline = runPipeline(fund);
@@ -33,48 +99,13 @@ export function runFund(fund: FundInput): FundResult {
   const scenarios: FundScenarioResult[] = [];
 
   for (const sc of pipeline.scenarios) {
-    const quarters = sc.quarters; // calendar quarter per inception index
-    const n = quarters.length;
-    const lastActualIndex =
-      lastActualOrd >= 0
-        ? quarters.findIndex((q) => calQuarterOrdinal(q) === lastActualOrd)
-        : -1;
-
-    const cf = computeCashflows({
-      scenarioId: sc.scenarioId,
-      quarters,
-      pic: sc.pic,
-      dpi: sc.dpi,
-      tvpi: sc.tvpi,
-      commitment: fund.commitment,
-      warnings,
-      status: fund.status,
-      lastActualIndex,
-    });
-
-    const costBasis = computeCostBasis(cf.P, cf.D, sc.terminalTvpi, warnings, sc.scenarioId);
-
-    const feeBridge = computeFeeBridgeInception({
-      nInc: n,
-      P: cf.P,
-      NAV: cf.NAV,
-      costBasis,
-      commitment: fund.commitment,
-      effectiveDate: fund.effectiveDate,
-      investmentPeriodEnd: fund.investmentPeriodEnd,
+    const { quarters, n, cf, costBasis, feeBridge, hc } = computeScenarioPrimitives(
+      fund,
+      sc,
       effLiq,
-      fees: fund.fees,
-    });
-
-    const hc = computeHurdleCarry({
-      p: cf.p,
-      d: cf.d,
-      P: cf.P,
-      D: cf.D,
-      hurdleAnnual: fund.fees.hurdleAnnual,
-      carryRate: fund.fees.carryRate,
-      catchUp: fund.fees.catchUp,
-    });
+      lastActualOrd,
+      warnings,
+    );
 
     const rows: FundQuarterRow[] = new Array(n);
     for (let i = 0; i < n; i++) {

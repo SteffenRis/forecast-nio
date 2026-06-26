@@ -21,6 +21,8 @@ import type {
   Money,
 } from './types';
 import { runFund } from './fund';
+import { buildFundFeeTrace } from './feeTrace';
+import type { FundFeeTrace } from './feeTrace';
 import { runPortfolio } from './portfolio';
 import { runOverlay } from './overlay';
 import { portfolioIrrStages, kidScenario, annualCostAllocation } from './kid';
@@ -238,6 +240,22 @@ export function runFundForecast(input: FundInputJSON): FundForecastResult {
   return serializeFund(runFund(parseFund(input)));
 }
 
+/**
+ * Build the fee/carry calculation trace for a single fund (per-quarter intermediates
+ * + scenario scalars). Already JSON-serializable; we copy the quarter objects at the
+ * boundary to keep the public surface free of shared internal references.
+ */
+export function runFundFeeTrace(input: FundInputJSON): FundFeeTrace {
+  const t = buildFundFeeTrace(parseFund(input));
+  return {
+    fundId: t.fundId,
+    scenarios: t.scenarios.map((sc) => ({
+      ...sc,
+      quarters: sc.quarters.map((q) => ({ ...q, quarter: { ...q.quarter } })),
+    })),
+  };
+}
+
 /** Run a portfolio forecast (with optional LP overlay). JSON in/out. */
 export function runPortfolioForecast(input: PortfolioInputJSON): PortfolioForecastResult {
   const portfolio = parsePortfolio(input);
@@ -319,6 +337,7 @@ export function xirr(flows: { date: string; amount: number }[]): number | null {
 
 // Re-export annualCostAllocation edge helper and key types.
 export { annualCostAllocation };
+export type { FundFeeTrace, FundFeeTraceScenario, FeeTraceQuarter } from './feeTrace';
 export type {
   TemplateInput,
   ScenarioTemplate,

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { cn } from '@/lib/cn'
 import { currencySymbol } from '@/lib/currency'
 import { quarterLabel } from '@/lib/quarter'
@@ -9,6 +10,20 @@ import {
   type QuarterDeviation,
 } from '@/lib/comparison'
 import { Toggle } from '@/components/common/Toggle'
+import { CalcDrawer } from '@/components/common/CalcDrawer'
+import { explainPerfCell, type PerfCellRef, type PerfColumn, type PerfRowKind } from '@/lib/perfExplain'
+
+/** Column order of the value cells (matches VALUE_COLS), as PerfCellRef columns. */
+const PERF_COLS: PerfColumn[] = [
+  'contributed',
+  'distributed',
+  'recallable',
+  'nav',
+  'pic',
+  'dpi',
+  'rvpi',
+  'tvpi',
+]
 
 const card = 'rounded-xl border border-border-default bg-white p-5 shadow-sm'
 const DASH = '—'
@@ -93,6 +108,9 @@ interface Props {
   title?: string
   /** Hide the Show-forecast toggle (e.g. lookthrough grids that follow a shared toggle). */
   hideToggle?: boolean
+  /** When set, every number becomes clickable → a calculation-trace drawer (fund
+   *  level). Omitted by the portfolio roll-up, which stays read-only. */
+  commitment?: number
 }
 
 export function PerformanceGrid({
@@ -102,7 +120,10 @@ export function PerformanceGrid({
   onToggleForecast,
   title = 'Plan vs actual',
   hideToggle = false,
+  commitment,
 }: Props) {
+  // The plan-vs-actual number whose calculation the drawer is tracing (null = closed).
+  const [selected, setSelected] = useState<PerfCellRef | null>(null)
 
   // Toggle OFF → only quarters that have an actual (one Actual line each).
   // Toggle ON  → the full forecast horizon (Plan always; Actual/Δ where present).
@@ -205,19 +226,42 @@ export function PerformanceGrid({
                             {tag.label}
                           </span>
                         </td>
-                        {cells.map((cell, ci) => (
-                          <td
-                            key={ci}
-                            className={cn(
-                              'px-1.5 py-1.5 text-right tabular-nums',
-                              cell.className,
-                              ci === DIVIDER_AT && 'border-l border-border-subtle pl-3',
-                              border,
-                            )}
-                          >
-                            {cell.text}
-                          </td>
-                        ))}
+                        {cells.map((cell, ci) => {
+                          const rowKind: PerfRowKind =
+                            kind === 'forecast' ? 'plan' : kind === 'actual' ? 'actual' : 'deviation'
+                          const clickable =
+                            commitment !== undefined && cell.text !== DASH && cell.text !== 'n.a.'
+                          return (
+                            <td
+                              key={ci}
+                              className={cn(
+                                'px-1.5 py-1.5 text-right tabular-nums',
+                                cell.className,
+                                ci === DIVIDER_AT && 'border-l border-border-subtle pl-3',
+                                border,
+                              )}
+                            >
+                              {clickable ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setSelected({
+                                      year: c.quarter.year,
+                                      q: c.quarter.q,
+                                      row: rowKind,
+                                      col: PERF_COLS[ci],
+                                    })
+                                  }
+                                  className="underline-offset-2 hover:underline focus:underline focus:outline-none"
+                                >
+                                  {cell.text}
+                                </button>
+                              ) : (
+                                cell.text
+                              )}
+                            </td>
+                          )
+                        })}
                       </tr>
                     )
                   })
@@ -227,6 +271,14 @@ export function PerformanceGrid({
           </div>
         )}
       </div>
+
+      {commitment !== undefined && (
+        <CalcDrawer
+          selected={selected}
+          onClose={() => setSelected(null)}
+          build={(ref) => explainPerfCell(data, ref, commitment, currency)}
+        />
+      )}
     </div>
   )
 }
