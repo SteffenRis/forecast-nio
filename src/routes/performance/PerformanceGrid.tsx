@@ -12,6 +12,7 @@ import {
 import { Toggle } from '@/components/common/Toggle'
 import { CalcDrawer } from '@/components/common/CalcDrawer'
 import { explainPerfCell, type PerfCellRef, type PerfColumn, type PerfRowKind } from '@/lib/perfExplain'
+import type { Explanation } from '@/lib/explain'
 
 /** Column order of the value cells (matches VALUE_COLS), as PerfCellRef columns. */
 const PERF_COLS: PerfColumn[] = [
@@ -111,6 +112,9 @@ interface Props {
   /** When set, every number becomes clickable → a calculation-trace drawer (fund
    *  level). Omitted by the portfolio roll-up, which stays read-only. */
   commitment?: number
+  /** Override the trace builder (e.g. the aggregate roll-up's per-fund breakdown). When
+   *  omitted, the default `explainPerfCell` recurrence/ratio trace is used. */
+  explain?: (ref: PerfCellRef) => Explanation<PerfCellRef>
 }
 
 export function PerformanceGrid({
@@ -121,6 +125,7 @@ export function PerformanceGrid({
   title = 'Plan vs actual',
   hideToggle = false,
   commitment,
+  explain,
 }: Props) {
   // The plan-vs-actual number whose calculation the drawer is tracing (null = closed).
   const [selected, setSelected] = useState<PerfCellRef | null>(null)
@@ -276,7 +281,7 @@ export function PerformanceGrid({
         <CalcDrawer
           selected={selected}
           onClose={() => setSelected(null)}
-          build={(ref) => explainPerfCell(data, ref, commitment, currency)}
+          build={explain ?? ((ref) => explainPerfCell(data, ref, commitment, currency))}
         />
       )}
     </div>

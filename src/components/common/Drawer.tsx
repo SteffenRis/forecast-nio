@@ -13,6 +13,10 @@ interface DrawerProps {
   ariaLabel?: string
 }
 
+// Stack of open drawers so a single Escape closes only the topmost (nested drawers,
+// e.g. a calc-trace opened from a lookthrough drawer, peel off one layer at a time).
+const openStack: symbol[] = []
+
 /** A large right-side slide-in panel. Rendered in a portal above everything, with a
  *  scrim, Escape + click-outside to close, and a slide transition on open/close.
  *  Mirrors ConfirmDeleteDialog's portal conventions. */
@@ -34,14 +38,21 @@ export function Drawer({ open, onClose, title, lead, children, ariaLabel }: Draw
 
   useEffect(() => {
     if (!open) return
+    const token = Symbol('drawer')
+    openStack.push(token)
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
+      // Only the topmost open drawer responds to Escape.
+      if (e.key === 'Escape' && openStack[openStack.length - 1] === token) {
         e.preventDefault()
         onClose()
       }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      const i = openStack.indexOf(token)
+      if (i >= 0) openStack.splice(i, 1)
+    }
   }, [open, onClose])
 
   if (!mounted) return null
