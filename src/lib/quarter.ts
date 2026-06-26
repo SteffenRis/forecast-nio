@@ -37,6 +37,13 @@ export function nextQuarter(q: CalendarQuarterRef): CalendarQuarterRef {
   return q.q < 4 ? { year: q.year, q: (q.q + 1) as 1 | 2 | 3 | 4 } : { year: q.year + 1, q: 1 }
 }
 
+/** The last calendar day of a quarter as an ISO date (e.g. Q2 2025 → '2025-06-30').
+ *  Quarter-ends are fixed month-days: Mar 31 · Jun 30 · Sep 30 · Dec 31. */
+export function quarterEndIso(q: CalendarQuarterRef): IsoDate {
+  const endMonthDay = { 1: '03-31', 2: '06-30', 3: '09-30', 4: '12-31' } as const
+  return `${q.year}-${endMonthDay[q.q]}`
+}
+
 /** The calendar quarter containing an ISO 'YYYY-MM-DD' date (e.g. '2025-05-10' → Q2 2025). */
 export function quarterOfIso(iso: IsoDate): CalendarQuarterRef {
   const [y, m] = iso.split('-').map(Number)

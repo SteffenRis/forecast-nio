@@ -28,8 +28,13 @@ only the inputs and recompute the rest.
    reached through **memoized selectors** in `src/store/selectors/`. A component
    never calls the engine directly and never recomputes in `render`.
 
-3. **No fetching, ever.** No `react-query`, `swr`, `axios`, or `useEffect(fetch)`.
-   The absence of a network layer is a feature; reject any PR that adds one.
+3. **No fetching, ever** — with one carve-out. No `react-query`, `swr`, `axios`, or
+   `useEffect(fetch)` for app data; the absence of a network layer is a feature, so
+   reject any PR that adds one. **The single allowed exception** is the frankfurter.dev
+   exchange-rate integration (`src/lib/fx/frankfurter.ts`): it pulls *external reference
+   data*, fires only from an explicit user click (never in render / `useEffect` / on
+   load), and writes results to the store as raw inputs (`PulledRate`). The engine still
+   imports nothing and makes no network call. Any other `fetch` is still forbidden.
 
 4. **Persistence is automatic; portability is explicit.**
    - `localStorage` (via zustand `persist`) is the **autosave**.

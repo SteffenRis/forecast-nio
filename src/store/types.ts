@@ -175,6 +175,26 @@ export interface Portfolio {
   overlay: OverlayParams | null
 }
 
+// ---- Exchange rates ------------------------------------------------------
+
+/** One exchange rate pulled from frankfurter.dev (ECB reference rates).
+ *  Observed reference data = a RAW INPUT, never a derived/engine number.
+ *  `base → quote` is the rate as requested for `date`; see ARCHITECTURE.md for
+ *  the single, user-triggered network call that produces these. */
+export interface PulledRate {
+  base: string
+  quote: string
+  /** The date we asked for — one of the system's relevant dates. */
+  date: IsoDate
+  /** The date frankfurter actually returned. ECB rates skip weekends/holidays,
+   *  so this can be the nearest prior business day (ecbDate ≤ date). */
+  ecbDate: IsoDate
+  /** Units of `quote` per 1 unit of `base`. */
+  rate: number
+  /** ISO timestamp of when the pull happened. */
+  fetchedAt: string
+}
+
 // ---- Settings & UI -------------------------------------------------------
 
 export interface Settings {

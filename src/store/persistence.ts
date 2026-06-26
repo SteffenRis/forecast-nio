@@ -39,10 +39,15 @@ export function dataFromState(s: StoreState): SnapshotData {
   }
 }
 
-/** What `persist` writes to localStorage (data slices + the one persisted ui flag). */
+/** What `persist` writes to localStorage (data slices + the one persisted ui flag).
+ *  `fxRates` is persisted so pulled rates survive a reload, but is deliberately kept
+ *  out of SnapshotData — it's a re-pullable reference cache, not part of the portable
+ *  document, so the export schema is untouched. (Additive on load: an old localStorage
+ *  without `fxRates` simply falls back to the slice's empty initial state.) */
 export function partialize(s: StoreState): Partial<StoreState> {
   return {
     ...dataFromState(s),
+    fxRates: s.fxRates,
     ui: { sidebarCollapsed: s.ui.sidebarCollapsed },
   }
 }
