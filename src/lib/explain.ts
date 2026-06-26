@@ -20,6 +20,13 @@ export interface ExplainCheck {
   detail: string
 }
 
+/** A small breakdown table (e.g. a portfolio number decomposed across its underlying
+ *  funds). `columns` are the headers; each row's `cells` align to them. */
+export interface ExplainBreakdown {
+  columns: string[]
+  rows: { cells: string[]; emphasis?: boolean }[]
+}
+
 export interface Explanation<R> {
   title: string
   value: string
@@ -27,4 +34,6 @@ export interface Explanation<R> {
   formula?: string
   steps: ExplainStep<R>[]
   checks: ExplainCheck[]
+  /** Optional tabular decomposition (rendered as a table under the steps). */
+  breakdown?: ExplainBreakdown
 }

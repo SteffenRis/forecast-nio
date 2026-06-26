@@ -1,16 +1,19 @@
-import { useMemo, useState } from 'react'
-import { X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronRight, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useStore } from '@/store'
 import { CURRENCIES, currencySymbol } from '@/lib/currency'
 import { formatMoneyCompact } from '@/lib/format'
 import { NumberInput } from '@/components/common/NumberInput'
 import { Tabs } from '@/components/common/Tabs'
+import { Drawer } from '@/components/common/Drawer'
 import { sumFundAllocations } from '@/store/selectors/entities'
 import { portfolioFxRate } from '@/lib/portfolio'
 import type { Portfolio } from '@/store/types'
+import { PerformanceGrid } from '@/routes/performance/PerformanceGrid'
 import { PortfolioRollup } from './PortfolioRollup'
 import { PortfolioKidBridge } from './PortfolioKidBridge'
+import { usePortfolioComparison, type LookthroughEntry } from './usePortfolioComparison'
 
 const textField =
   'h-9 w-full rounded-md border border-border-default bg-white px-3 text-[13px] text-body outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100'
@@ -75,6 +78,24 @@ export function PortfolioEditor({ portfolioId }: { portfolioId: string }) {
     () => sumFundAllocations(portfolios, portfolioOrder),
     [portfolios, portfolioOrder],
   )
+
+  // Per-fund lookthrough: clicking a fund opens a right drawer with its contribution grid.
+  const comparison = usePortfolioComparison(portfolioId)
+  const lookthroughById = useMemo(() => {
+    const m = new Map<string, LookthroughEntry>()
+    for (const e of comparison.lookthrough) m.set(e.fundId, e)
+    return m
+  }, [comparison.lookthrough])
+  const [openFundId, setOpenFundId] = useState<string | null>(null)
+  const [shownEntry, setShownEntry] = useState<LookthroughEntry | null>(null)
+  const [drawerShow, setDrawerShow] = useState(true)
+  // Keep the entry rendered through the slide-out (and live-update it while open).
+  useEffect(() => {
+    if (openFundId) {
+      const e = lookthroughById.get(openFundId)
+      if (e) setShownEntry(e)
+    }
+  }, [openFundId, lookthroughById])
 
   if (!portfolio) return null
   const ccy = portfolio.reportingCurrency
@@ -168,7 +189,24 @@ export function PortfolioEditor({ portfolioId }: { portfolioId: string }) {
                       return (
                         <tr key={id} className="border-t border-border-subtle">
                           <td className="py-2 pr-3 font-medium text-body">
-                            {fund.name}
+                            {lookthroughById.has(id) ? (
+                              <button
+                                type="button"
+                                onClick={() => setOpenFundId(id)}
+                                aria-label={`Look through to ${fund.name}`}
+                                className="group inline-flex items-center gap-1 text-left font-medium text-body"
+                              >
+                                <span className="underline-offset-2 group-hover:text-brand-navy group-hover:underline">
+                                  {fund.name}
+                                </span>
+                                <ChevronRight
+                                  className="size-3.5 text-slate-400 group-hover:text-brand-navy"
+                                  strokeWidth={2.25}
+                                />
+                              </button>
+                            ) : (
+                              fund.name
+                            )}
                             {noFx && (
                               <span className="ml-2 text-[11px] font-medium text-negative">
                                 FX rate needed for {fund.currency}→{ccy}
@@ -267,6 +305,36 @@ export function PortfolioEditor({ portfolioId }: { portfolioId: string }) {
       </div>
       {tab === 'rollup' && <PortfolioRollup portfolioId={portfolioId} />}
       {tab === 'kid' && <PortfolioKidBridge portfolioId={portfolioId} />}
+
+      {/* Lookthrough: a fund's contribution to this portfolio, with click-to-trace cells.
+       *  Triggered from the always-visible Underlying-funds table, so it spans both tabs. */}
+      <Drawer
+        open={!!openFundId}
+        onClose={() => setOpenFundId(null)}
+        ariaLabel="Fund lookthrough"
+        title={
+          shownEntry ? (
+            <span className="flex flex-wrap items-baseline gap-x-2">
+              <span>{shownEntry.name}</span>
+              <span className="text-[12px] font-normal text-muted">
+                · contribution to {portfolio.name} · {fmtPct(shownEntry.sharePct)} of fund
+              </span>
+            </span>
+          ) : (
+            ''
+          )
+        }
+      >
+        {shownEntry && (
+          <PerformanceGrid
+            data={shownEntry.data}
+            currency={ccy}
+            commitment={shownEntry.commitmentReporting}
+            showForecast={drawerShow}
+            onToggleForecast={setDrawerShow}
+          />
+        )}
+      </Drawer>
     </div>
   )
 }
