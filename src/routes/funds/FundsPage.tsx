@@ -4,9 +4,7 @@ import { useStore } from '@/store'
 import { cn } from '@/lib/cn'
 import type { Fund } from '@/store/types'
 import { RoutePlaceholder } from '@/components/common/RoutePlaceholder'
-import { Tabs } from '@/components/common/Tabs'
 import { FundEditor } from './FundEditor'
-import { FundFeesOverview } from './FundFeesOverview'
 
 const fieldCls =
   'h-9 rounded-md border border-border-default bg-white px-3 text-[13px] text-body outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100'
@@ -33,7 +31,6 @@ export function FundsPage() {
     const sel = st.ui.selectedFundId
     return sel && st.fundOrder.includes(sel) ? sel : (st.fundOrder[0] ?? '')
   })
-  const [tab, setTab] = useState<'terms' | 'fees'>('terms')
 
   const effectiveId = fundOrder.includes(activeId) ? activeId : (fundOrder[0] ?? '')
   const stored = effectiveId ? funds[effectiveId] : undefined
@@ -154,19 +151,7 @@ export function FundsPage() {
             </button>
           </div>
 
-          <div className="mt-4">
-            <Tabs
-              ariaLabel="Fund view"
-              tabs={[
-                { id: 'terms', label: 'Terms' },
-                { id: 'fees', label: 'Fees' },
-              ]}
-              value={tab}
-              onChange={setTab}
-            />
-          </div>
-
-          {tab === 'terms' && draft && (
+          {draft && (
             <FundEditor
               key={draft.id}
               fund={draft}
@@ -177,9 +162,6 @@ export function FundsPage() {
               onSave={onSave}
               onDiscard={onDiscard}
             />
-          )}
-          {tab === 'fees' && effectiveId && (
-            <FundFeesOverview fundId={effectiveId} dirty={dirty} />
           )}
         </>
       )}
