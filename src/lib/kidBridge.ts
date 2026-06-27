@@ -26,19 +26,28 @@ export interface KidScenarioInput {
   irrStages: (number | null)[] // gross → net ladder (length 3 or 6)
 }
 
-/** One case (scenario) row of the per-case table. */
+/** One case (scenario) row of the per-case table. The cumulative figures are scaled to
+ *  the investor (× scaleFactor) so the click-to-trace drawer reconciles per principal. */
 export interface KidRow {
   caseId: string
   caseLabel: string
   isBase: boolean
+  /** Σ Stage-3 paid-in / distributions, scaled to the investor — the TVPI inputs. */
+  paidIn: number
+  distributions: number
+  /** Stage-3 TVPI (distributions ÷ paid-in), or null when there's no paid-in. */
+  tvpi: number | null
   /** Stage-3 TVPI × principal, or null when there's no activity (TVPI ≤ 0). */
   totalValueBack: number | null
+  grossIrr: number | null
   netIrr: number | null
 }
 
-/** One row of the gross→net IRR waterfall. `irrAfter` is a decimal (0.183 = 18.3%). */
+/** One row of the gross→net IRR waterfall. `irrAfter` is a decimal (0.183 = 18.3%).
+ *  A `'txn'` row is a presentation-only transaction-cost line: it carries a hard-coded
+ *  cost from the fees-page input, not an IRR drag, so its IRR / drag cells stay null. */
 export interface WaterfallRow {
-  kind: 'start' | 'fee' | 'end'
+  kind: 'start' | 'fee' | 'txn' | 'end'
   label: string
   irrAfter: number | null
   /** Local IRR drop across this stage (pp); fee rows only, null on anchors. */
@@ -77,11 +86,16 @@ const LABELS_3 = [
   'Underlying manager carry',
   'Net IRR to investor',
 ]
+/** The label after which the transaction-cost line is spliced into the overlay-on
+ *  (6-stage) waterfall. */
+export const OUR_MGMT_LABEL = 'Our management fee'
+/** The presentation-only transaction-cost line label. */
+export const TXN_LABEL = 'Our transaction costs'
 const LABELS_6 = [
   'Gross IRR',
   'Underlying manager fees',
   'Underlying manager carry',
-  'Our management fee',
+  OUR_MGMT_LABEL,
   'Our expenses & establishment',
   'Our carry',
   'Net IRR to investor',
@@ -148,16 +162,22 @@ export function computeIrrWaterfall(irrStages: (number | null)[]): WaterfallRow[
   return rows
 }
 
-/** §5.2 — distribute `totalCost` across fee rows pro-rata by `dragPp`. Σ feeRow.cost
- *  === totalCost (± float epsilon). The Cost column is a presentation device, not an
- *  accounting decomposition of fees actually paid. */
+/** §5.2 — distribute `totalCost` across the rows. A `'txn'` row gets the hard-coded
+ *  `reservedByTxn` amount (the fees-page transaction-cost input, not pro-rata); the rest
+ *  (`totalCost − reservedByTxn`) is split across the IRR-drag fee rows pro-rata by
+ *  `dragPp`. Σ (fee + txn) costs === totalCost (± float epsilon); the Cost column is a
+ *  presentation device, not an accounting decomposition of fees actually paid. */
 export function allocateWaterfallCosts(
   rows: WaterfallRow[],
   totalCost: number | null,
+  reservedByTxn = 0,
 ): WaterfallRow[] {
+  const reserved = Number.isFinite(reservedByTxn) ? Math.max(0, reservedByTxn) : 0
   if (totalCost == null || !Number.isFinite(totalCost) || totalCost <= 0) {
-    return rows.map((r) => ({ ...r, costAllocation: null }))
+    // Nothing to distribute — still surface the txn line at its hard-coded input.
+    return rows.map((r) => ({ ...r, costAllocation: r.kind === 'txn' ? reserved : null }))
   }
+  const distributable = Math.max(0, totalCost - reserved)
   let denomPp = 0
   for (const r of rows) {
     if (r.kind === 'fee' && r.dragPp != null && Number.isFinite(r.dragPp) && r.dragPp > 0) {
@@ -165,15 +185,43 @@ export function allocateWaterfallCosts(
     }
   }
   if (denomPp <= 1e-9) {
-    // No usable drag to weight by — pin the whole cost to the end total.
-    return rows.map((r) => ({ ...r, costAllocation: r.kind === 'end' ? totalCost : null }))
+    // No usable drag to weight by — pin the whole cost to the end total (txn line aside).
+    return rows.map((r) => ({
+      ...r,
+      costAllocation: r.kind === 'txn' ? reserved : r.kind === 'end' ? totalCost : null,
+    }))
   }
   return rows.map((r) => {
     if (r.kind === 'start') return { ...r, costAllocation: null }
     if (r.kind === 'end') return { ...r, costAllocation: totalCost }
+    if (r.kind === 'txn') return { ...r, costAllocation: reserved }
     const valid = r.dragPp != null && Number.isFinite(r.dragPp) && r.dragPp > 0
-    return { ...r, costAllocation: valid ? (totalCost * (r.dragPp as number)) / denomPp : null }
+    return { ...r, costAllocation: valid ? (distributable * (r.dragPp as number)) / denomPp : null }
   })
+}
+
+/** Splice a presentation-only transaction-cost row into the overlay-on (6-stage)
+ *  waterfall, right after the "Our management fee" row. No-op for any other shape (the
+ *  3-stage overlay-off ladder has no overlay rows to sit between). The cost is filled in
+ *  later by `allocateWaterfallCosts` via `reservedByTxn`.
+ *
+ *  The engine has no separate transaction-cost IRR stage (its return impact is folded into
+ *  the adjacent overlay stage), so the line doesn't step the ladder: it carries the prior
+ *  stage's IRR and an explicit 0.00pp drag — always a number, never a dash. */
+export function insertTransactionCostRow(rows: WaterfallRow[]): WaterfallRow[] {
+  const idx = rows.findIndex((r) => r.label === OUR_MGMT_LABEL)
+  if (idx < 0) return rows
+  const prev = rows[idx]
+  const txnRow: WaterfallRow = {
+    kind: 'txn',
+    label: TXN_LABEL,
+    irrAfter: prev.irrAfter,
+    dragPp: prev.irrAfter != null ? 0 : null,
+    accumulatedDragPp: prev.accumulatedDragPp,
+    costAllocation: null,
+    annualCostAllocation: null,
+  }
+  return [...rows.slice(0, idx + 1), txnRow, ...rows.slice(idx + 1)]
 }
 
 /** §5.3 — annualize each row's cost over `years`, mirroring cost's null-handling so the
@@ -203,6 +251,9 @@ export function buildKidView(input: {
   totalCommitment: number
   /** Hypothetical investor commitment (default 10,000). */
   principal: number
+  /** Whole-portfolio transaction cost (txn-per-investment × #funds, reporting ccy).
+   *  Surfaced as its own waterfall line, scaled to the investor. Default 0. */
+  transactionCostTotal?: number
 }): KidView | null {
   const {
     scenarios,
@@ -212,6 +263,7 @@ export function buildKidView(input: {
     quartersLength,
     totalCommitment,
     principal,
+    transactionCostTotal = 0,
   } = input
   if (scenarios.length === 0 || totalCommitment <= 0) return null
 
@@ -245,20 +297,28 @@ export function buildKidView(input: {
     .map((s) => {
       const cumP = s.stage3.reduce((a, r) => a + r.paidIn, 0)
       const cumD = s.stage3.reduce((a, r) => a + r.distributions, 0)
-      const tvpi = cumP > 0 ? cumD / cumP : 0
+      const tvpi = cumP > 0 ? cumD / cumP : null
       return {
         caseId: s.scenarioId,
         caseLabel: s.label,
         isBase: s.isBase,
-        totalValueBack: tvpi > 0 ? tvpi * principal : null,
+        paidIn: cumP * scaleFactor,
+        distributions: cumD * scaleFactor,
+        tvpi,
+        totalValueBack: tvpi != null && tvpi > 0 ? tvpi * principal : null,
+        grossIrr: s.irrStages[0] ?? null,
         netIrr: s.irrStages[s.irrStages.length - 1] ?? null,
       }
     })
 
+  // Transaction cost (a hard-coded input) gets its own line in the overlay-on waterfall,
+  // scaled to the investor and carved out of the pro-rata total so the rows still sum.
+  const transactionCost = Math.max(0, transactionCostTotal) * scaleFactor
   const irrWaterfall = allocateAnnualCosts(
     allocateWaterfallCosts(
-      computeIrrWaterfall(base.irrStages),
+      insertTransactionCostRow(computeIrrWaterfall(base.irrStages)),
       totalCostsOverPeriod > 0 ? totalCostsOverPeriod : null,
+      transactionCost,
     ),
     years,
   )
