@@ -4,7 +4,8 @@
 //    Maps at the boundary) — Web-Worker-ready.
 // Internal modules may use Date; this layer translates at the edges.
 
-import { parseISO } from './util/daycount';
+import { parseISO, quarterOf, calQuarterOrdinal } from './util/daycount';
+import { inceptionToCalendarQuarter } from './pipeline';
 import type {
   FundInput,
   PortfolioInput,
@@ -15,6 +16,7 @@ import type {
   ForecastOverrides,
   ActualRecord,
   FundStatus,
+  ForecastPolicyMode,
   OverlayParams,
   FxTable,
   CalendarQuarter,
@@ -47,6 +49,7 @@ export interface FundInputJSON {
   overrides?: ForecastOverrides;
   actuals?: ActualRecord[];
   status: FundStatus;
+  policy?: ForecastPolicyMode;
 }
 
 export interface PortfolioFundRefJSON {
@@ -184,6 +187,7 @@ function parseFund(j: FundInputJSON): FundInput {
     ...(j.overrides ? { overrides: j.overrides } : {}),
     ...(j.actuals ? { actuals: j.actuals } : {}),
     status: j.status,
+    ...(j.policy ? { policy: j.policy } : {}),
   };
 }
 
@@ -335,6 +339,29 @@ export function xirr(flows: { date: string; amount: number }[]): number | null {
   return xirrDated(flows.map((f) => ({ date: parseISO(f.date), amount: f.amount })));
 }
 
+/**
+ * Map a user "reporting quarter" — anchored at the fund's effective-date quarter, the
+ * convention the Actuals grid and the comparison displays use — to the engine's
+ * internal forecast calendar quarter, which is dated by inception-block END (§5/§8).
+ *
+ * An actual at "effective-date quarter + k" lines up with inception quarter k+1, whose
+ * block-end calendar quarter is exactly `calendarQuarters[k]` — the quarter
+ * `applyActuals` matches against. Without this translation, an actual entered at the
+ * effective-date quarter (e.g. Q1 2024 for an effective date of 2024-02-15) never
+ * matches a forecast row (which starts at Q2 2024) and is silently dropped.
+ *
+ * Returns null for a reporting quarter before the fund's first period.
+ */
+export function reportingToForecastQuarter(
+  effectiveDateIso: string,
+  reporting: CalendarQuarter,
+): CalendarQuarter | null {
+  const eff = parseISO(effectiveDateIso);
+  const k = calQuarterOrdinal(reporting) - calQuarterOrdinal(quarterOf(eff));
+  if (k < 0) return null;
+  return inceptionToCalendarQuarter(eff, k + 1);
+}
+
 // Re-export annualCostAllocation edge helper and key types.
 export { annualCostAllocation };
 export type { FundFeeTrace, FundFeeTraceScenario, FeeTraceQuarter } from './feeTrace';
@@ -349,6 +376,7 @@ export type {
   AnchorPoint,
   ActualRecord,
   FundStatus,
+  ForecastPolicyMode,
   OverlayParams,
   FxTable,
   CalendarQuarter,

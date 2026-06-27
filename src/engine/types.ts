@@ -115,6 +115,21 @@ export interface ForecastOverrides {
 
 export type FundStatus = 'ACTIVE' | 'WOUND_DOWN' | 'ABANDONED';
 
+/**
+ * §7 actuals-update policy — how the go-forward forecast reacts when actuals arrive.
+ *  - 'rebase'    (default): snap the forward curve back onto the plan's ABSOLUTE
+ *                 trajectory (forward cumulative = plan[i]); the whole actual-vs-plan
+ *                 gap is made up in the first forecast quarter. The existing §7
+ *                 behaviour (`rebaseCurve`); the default when policy is omitted.
+ *  - 'scale'    : catch-up GRADUALLY — scale every remaining increment by a common
+ *                 factor s = (terminal − actual) / (terminal − plan_at_actual) so the
+ *                 curve reaches its original terminal smoothly. Behind → remaining
+ *                 higher; ahead → lower; relative pacing of the increments is kept.
+ *  - 'keep_plan': remaining increments stay at their planned size, anchored to the last
+ *                 actual; the actual-vs-plan offset rides forward and the terminal floats.
+ */
+export type ForecastPolicyMode = 'rebase' | 'scale' | 'keep_plan';
+
 export interface ActualRecord {
   quarter: CalendarQuarter;
   cumulativePaidIn: Money;
@@ -151,6 +166,8 @@ export interface FundInput {
   overrides?: ForecastOverrides;
   actuals?: ActualRecord[];
   status: FundStatus;
+  /** §7 actuals-update policy. Defaults to 'scale' when omitted. */
+  policy?: ForecastPolicyMode;
 }
 
 // ---------------------------------------------------------------------------

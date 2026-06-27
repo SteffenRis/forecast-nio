@@ -44,6 +44,46 @@ export interface QuarterComparison {
   forecast: QuarterAmounts | null
 }
 
+/** Prefix-sum a dense forecast's periodic flows (pNet/dNet) into cumulative
+ *  QuarterAmounts, keyed by calendar-quarter ordinal. Each row i is re-anchored to
+ *  effectiveDate's quarter + i (the engine emits a gap-free quarterly curve, so this
+ *  is a uniform shift that keeps quarters consecutive). `recallable` is always null —
+ *  the plan never forecasts recallables. Shared by the plan-vs-actual and
+ *  set-vs-updated comparisons. */
+export function cumulativeForecastByOrdinal(input: {
+  commitment: number
+  effectiveDate: string
+  rows: ForecastRow[]
+}): { byOrd: Map<number, QuarterAmounts>; quarterByOrd: Map<number, CalendarQuarterRef> } {
+  const baseOrd = quarterOrdinal(quarterOfIso(input.effectiveDate))
+  const byOrd = new Map<number, QuarterAmounts>()
+  const quarterByOrd = new Map<number, CalendarQuarterRef>()
+  let cumP = 0
+  let cumD = 0
+  const orderedRows = input.rows
+    .map((r) => ({
+      srcOrd: quarterOrdinal({ year: r.quarter.year, q: r.quarter.q as 1 | 2 | 3 | 4 }),
+      pNet: r.pNet,
+      dNet: r.dNet,
+      nav: r.nav,
+    }))
+    .sort((a, b) => a.srcOrd - b.srcOrd)
+  orderedRows.forEach((row, i) => {
+    cumP += row.pNet
+    cumD += row.dNet
+    const ord = baseOrd + i
+    quarterByOrd.set(ord, quarterFromOrdinal(ord))
+    byOrd.set(ord, {
+      contributed: cumP,
+      distributed: cumD,
+      recallable: null,
+      nav: row.nav,
+      multiples: fundMultiples({ commitment: input.commitment, paidIn: cumP, distributed: cumD, nav: row.nav }),
+    })
+  })
+  return { byOrd, quarterByOrd }
+}
+
 /** Build one comparison entry per quarter over the union of forecast ∪ actual
  *  quarters, oldest → newest. The plan's cumulative Contributed/Distributed are
  *  reconstructed as a running prefix-sum of the periodic forecast flows. */
@@ -58,36 +98,12 @@ export function buildFundComparison(input: {
 }): QuarterComparison[] {
   const { commitment, effectiveDate, actuals, forecastRows } = input
 
-  // Plan side: prefix-sum periodic paid-in / distributions into cumulative stocks.
-  // Re-anchor each forecast row to the fund's effective-date quarter by index, so
-  // the plan curve starts where the actuals do (forecast row i → effective-date
-  // quarter + i). The engine emits a dense, gap-free quarterly curve, so this is a
-  // uniform shift that keeps quarters consecutive.
-  const baseOrd = quarterOrdinal(quarterOfIso(effectiveDate))
-  const forecastByOrd = new Map<number, QuarterAmounts>()
-  const quarterByOrd = new Map<number, CalendarQuarterRef>()
-  let cumP = 0
-  let cumD = 0
-  const orderedRows = forecastRows
-    .map((r) => ({
-      srcOrd: quarterOrdinal({ year: r.quarter.year, q: r.quarter.q as 1 | 2 | 3 | 4 }),
-      pNet: r.pNet,
-      dNet: r.dNet,
-      nav: r.nav,
-    }))
-    .sort((a, b) => a.srcOrd - b.srcOrd)
-  orderedRows.forEach((row, i) => {
-    cumP += row.pNet
-    cumD += row.dNet
-    const ord = baseOrd + i
-    quarterByOrd.set(ord, quarterFromOrdinal(ord))
-    forecastByOrd.set(ord, {
-      contributed: cumP,
-      distributed: cumD,
-      recallable: null,
-      nav: row.nav,
-      multiples: fundMultiples({ commitment, paidIn: cumP, distributed: cumD, nav: row.nav }),
-    })
+  // Plan side: prefix-sum periodic flows into cumulative stocks, re-anchored to the
+  // fund's effective-date quarter (forecast row i → effective-date quarter + i).
+  const { byOrd: forecastByOrd, quarterByOrd } = cumulativeForecastByOrdinal({
+    commitment,
+    effectiveDate,
+    rows: forecastRows,
   })
 
   // Actual side: amounts are already cumulative-to-date.

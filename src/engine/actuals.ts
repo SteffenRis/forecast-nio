@@ -8,6 +8,7 @@ import type {
   Money,
   ActualRecord,
   FundStatus,
+  ForecastPolicyMode,
   Warning,
 } from './types';
 import { calQuarterOrdinal } from './util/daycount';
@@ -22,6 +23,8 @@ export interface ApplyActualsInput {
   commitment: Money;
   actuals: ActualRecord[];
   status: FundStatus;
+  /** §7 actuals-update policy. Defaults to 'scale' (the existing rebasing). */
+  policy?: ForecastPolicyMode;
   inceptionIndex: number;
   terminalIndex: number;
   warnings: Warning[];
@@ -89,6 +92,7 @@ export function applyActuals(input: ApplyActualsInput): ApplyActualsResult {
 
   const last = indexed[indexed.length - 1];
   const lastIdx = last.index;
+  const mode: ForecastPolicyMode = input.policy ?? 'rebase';
 
   // Status override: WOUND_DOWN / ABANDONED → zero forward.
   if (status === 'WOUND_DOWN' || status === 'ABANDONED') {
@@ -107,6 +111,69 @@ export function applyActuals(input: ApplyActualsInput): ApplyActualsResult {
     return { pic, dpi, tvpi, lastActualIndex: lastIdx };
   }
 
+  // Policy 'keep_plan': forward quarters keep their ORIGINAL planned increments,
+  // anchored to the last actual. The actual-vs-plan offset rides forward (no
+  // catch-up) and the terminal floats. `input.pic/dpi/tvpi` are the unmutated
+  // planned curves (the working slices were overwritten with actuals above), so
+  // their period-over-period deltas are the original plan's increments.
+  if (mode === 'keep_plan') {
+    const picOut = pic.slice();
+    const dpiOut = dpi.slice();
+    const tvpiOut = tvpi.slice();
+    for (let i = lastIdx + 1; i < n; i++) {
+      picOut[i] = picOut[i - 1] + (input.pic[i] - input.pic[i - 1]);
+      dpiOut[i] = dpiOut[i - 1] + (input.dpi[i] - input.dpi[i - 1]);
+      tvpiOut[i] = tvpiOut[i - 1] + (input.tvpi[i] - input.tvpi[i - 1]);
+    }
+    // Terminal TVPI snaps to terminal DPI (end-of-life invariant), as elsewhere.
+    tvpiOut[terminalIndex] = dpiOut[terminalIndex];
+    return { pic: picOut, dpi: dpiOut, tvpi: tvpiOut, lastActualIndex: lastIdx };
+  }
+
+  // Policy 'scale': spread the catch-up across remaining quarters so the forecast
+  // reaches its ORIGINAL terminal smoothly — every remaining increment scaled by the
+  // same factor s = (terminal − actual)/(terminal − plan_at_actual). Behind plan →
+  // remaining higher; ahead → lower; the relative size of each planned increment is
+  // preserved. `input.pic/dpi/tvpi` are the unmutated plan; working `pic/dpi/tvpi`
+  // already carry the actuals for q ≤ lastIdx.
+  if (mode === 'scale') {
+    const scaleForward = (working: Ratio[], plan: Ratio[]): Ratio[] => {
+      const out = working.slice();
+      const A = working[lastIdx];
+      const planGap = plan[terminalIndex] - plan[lastIdx];
+      const gap = plan[terminalIndex] - A;
+      // gap ≤ 0 (already at/above terminal) or no planned remaining → hold flat at A.
+      const s = gap > 0 && Math.abs(planGap) > 1e-12 ? gap / planGap : 0;
+      for (let i = lastIdx + 1; i < n; i++) {
+        out[i] = s === 0 ? A : A + s * (plan[i] - plan[lastIdx]);
+      }
+      return out;
+    };
+    if (pic[lastIdx] > input.pic[terminalIndex]) {
+      pushWarning(
+        warnings,
+        'pic_above_terminal_flat_forward',
+        'Actuals push PIC above template terminal; flat-forwarding at elevated value.',
+        { index: lastIdx },
+      );
+    }
+    if (dpi[lastIdx] > input.dpi[terminalIndex] + 1e-12) {
+      pushWarning(
+        warnings,
+        'actuals_above_terminal',
+        'Actual DPI exceeds terminal; forward curve may be non-monotonic.',
+        { index: lastIdx },
+      );
+    }
+    const picOut = scaleForward(pic, input.pic);
+    const dpiOut = scaleForward(dpi, input.dpi);
+    const tvpiOut = scaleForward(tvpi, input.tvpi);
+    tvpiOut[terminalIndex] = dpiOut[terminalIndex];
+    return { pic: picOut, dpi: dpiOut, tvpi: tvpiOut, lastActualIndex: lastIdx };
+  }
+
+  // Policy 'rebase' (default): snap the forward curve onto the plan's absolute
+  // trajectory (forward cumulative = plan[i]).
   // Forward rebasing for q > q_last_actual using §6 formula with start anchor
   // (q_last_actual, actual value) and end = terminal. Per curve.
   const forwardRebase = (curve: Ratio[], startVal: Ratio): Ratio[] => {

@@ -5,10 +5,12 @@ import type { Fund, Portfolio, Settings, Template } from './types'
 export const PERSIST_NAME = 'fundframe-forecasting'
 // v2: Template gained description/assetClass/fundLifeYears and a fixed 4-case shape
 // (Scenario.dpiVsBase). v3: Fund gained descriptive fields (gpName, fundSizeActual,
-// targetFundSize, acceptanceDate). A bump resets old localStorage to the new seed
+// targetFundSize, acceptanceDate). v4: Fund gained `policy` (forecast-update mode;
+// default 'scale') and `setForecast` (frozen original-plan snapshot). Both optional,
+// so pre-v4 JSON imports are safe. A bump resets old localStorage to the new seed
 // (see migrate); JSON export/import is the escape hatch.
-export const PERSIST_VERSION = 3
-export const SCHEMA_VERSION = 3
+export const PERSIST_VERSION = 4
+export const SCHEMA_VERSION = 4
 
 /** The portable data document (the "save file"). */
 export interface SnapshotData {
