@@ -183,6 +183,36 @@ describe('quarterDeviation — Actual − Plan per field', () => {
   })
 })
 
+describe('buildFundComparison — since-inception IRR per quarter', () => {
+  it('is null at inception when NAV ≈ paid-in (no sign change yet)', () => {
+    const actuals: ActualRow[] = [
+      { quarter: { year: 2024, q: 1 }, cumulativePaidIn: 1_000_000, cumulativeDistributions: 0, nav: 1_000_000 },
+    ]
+    const data = buildFundComparison({ commitment, effectiveDate: '2024-01-15', actuals, forecastRows: [] })
+    expect(data[0].actual?.irr).toBeNull()
+  })
+
+  it('solves the money-weighted XIRR over the dated net flows (≈ 10%)', () => {
+    // −1,000,000 at Q1 2024 end, +1,100,000 exactly one year later → XIRR = 10%.
+    const actuals: ActualRow[] = [
+      { quarter: { year: 2024, q: 1 }, cumulativePaidIn: 1_000_000, cumulativeDistributions: 0, nav: 0 },
+      { quarter: { year: 2025, q: 1 }, cumulativePaidIn: 1_000_000, cumulativeDistributions: 1_100_000, nav: 0 },
+    ]
+    const data = buildFundComparison({ commitment, effectiveDate: '2024-01-15', actuals, forecastRows: [] })
+    expect(data.at(-1)?.actual?.irr).toBeCloseTo(0.1, 4)
+  })
+
+  it('deviation IRR is Actual − Plan in fractional terms (null when a side is null)', () => {
+    const a: QuarterAmounts = {
+      contributed: 1, distributed: 0, recallable: null, nav: 0, irr: 0.12,
+      multiples: fundMultiples({ commitment: 1, paidIn: 1, distributed: 0, nav: 0 }),
+    }
+    const f: QuarterAmounts = { ...a, irr: 0.1 }
+    expect(quarterDeviation(a, f).irr).toBeCloseTo(0.02, 10)
+    expect(quarterDeviation(a, { ...f, irr: null }).irr).toBeNull()
+  })
+})
+
 describe('buildPortfolioComparison — aggregates underlying funds pro-rata', () => {
   // multiples on the input sides are ignored by the aggregator (recomputed vs the
   // portfolio's total commitment), so any value works here.
@@ -196,6 +226,7 @@ describe('buildPortfolioComparison — aggregates underlying funds pro-rata', ()
     distributed,
     recallable,
     nav,
+    irr: null,
     multiples: fundMultiples({ commitment: 1, paidIn: contributed, distributed, nav }),
   })
   const cmp = (
@@ -338,5 +369,19 @@ describe('buildPortfolioComparison — aggregates underlying funds pro-rata', ()
     })
     // Spot-check the per-quarter FX actually varied: Q1 actual A = 800 × 1.1 = 880.
     expect(onlyA[0].actual?.contributed).toBeCloseTo(880, 6)
+  })
+
+  it('computes the portfolio IRR from the summed net cash-flow stream (≈ 10%)', () => {
+    // One fund, −1,000,000 at Q1 2024 then +1,100,000 a year later → aggregate XIRR = 10%.
+    const fund: QuarterComparison[] = [
+      cmp(2024, 1, null, amt(1_000_000, 0, 0)),
+      cmp(2025, 1, null, amt(1_000_000, 1_100_000, 0)),
+    ]
+    const data = buildPortfolioComparison({
+      totalCommitment: 30_000_000,
+      funds: [{ comparison: fund, factor: 1 }],
+    })
+    expect(data[0].actual?.irr).toBeNull()
+    expect(data.at(-1)?.actual?.irr).toBeCloseTo(0.1, 4)
   })
 })

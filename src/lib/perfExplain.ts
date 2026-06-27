@@ -4,20 +4,21 @@
 // drilling into a child number) and trust-checks. No engine/React/store imports —
 // only types + the shared formatters — so it stays trivially unit-testable.
 
-import type { Explanation, ExplainCheck, ExplainStep } from './explain'
+import type { Explanation, ExplainBreakdown, ExplainCheck, ExplainStep } from './explain'
 import {
   quarterDeviation,
   type QuarterAmounts,
   type QuarterComparison,
 } from './comparison'
-import { formatMoney } from './format'
+import { formatMoney, formatPercent } from './format'
 import { formatMultiple } from './metrics'
-import { quarterLabel } from './quarter'
+import { quarterEndIso, quarterLabel } from './quarter'
 
 export type PerfRowKind = 'plan' | 'actual' | 'deviation'
 export type PerfAmountCol = 'contributed' | 'distributed' | 'recallable' | 'nav'
 export type PerfMultipleCol = 'pic' | 'dpi' | 'rvpi' | 'tvpi'
-export type PerfColumn = PerfAmountCol | PerfMultipleCol
+/** IRR is its own kind: not a cumulative amount, not a ratio of this quarter's amounts. */
+export type PerfColumn = PerfAmountCol | PerfMultipleCol | 'irr'
 
 /** Identifies which plan-vs-actual number was clicked. */
 export interface PerfCellRef {
@@ -36,6 +37,7 @@ const COL_LABEL: Record<PerfColumn, string> = {
   dpi: 'DPI',
   rvpi: 'RVPI',
   tvpi: 'TVPI',
+  irr: 'IRR',
 }
 const ROW_LABEL: Record<PerfRowKind, string> = { plan: 'Plan', actual: 'Actual', deviation: 'Δ' }
 
@@ -60,8 +62,9 @@ function amountOf(side: QuarterAmounts, col: PerfAmountCol): number | null {
   }
 }
 
-/** Value of any cell on one side (plan/actual): amount or multiple. */
+/** Value of any cell on one side (plan/actual): amount, multiple, or IRR. */
 function cellOf(side: QuarterAmounts, col: PerfColumn): number | null {
+  if (col === 'irr') return side.irr
   return isMultiple(col) ? side.multiples[col] : amountOf(side, col)
 }
 
@@ -91,8 +94,97 @@ export function explainPerfCell(
     }
   }
 
+  if (ref.col === 'irr') return explainIrr(data, idx, side, ref, money)
   if (isMultiple(ref.col)) return explainMultiple(side, ref, commitment, money)
   return explainAmount(data, idx, side, ref, commitment, money)
+}
+
+// ---- IRR cells (XIRR over the since-inception dated net cash flows) ---------
+
+function explainIrr(
+  data: QuarterComparison[],
+  idx: number,
+  side: QuarterAmounts,
+  ref: PerfCellRef,
+  money: (n: number) => string,
+): Explanation<PerfCellRef> {
+  const row = ref.row as 'plan' | 'actual'
+  const title = `IRR — ${ROW_LABEL[ref.row]} · ${ql(ref.year, ref.q)}`
+  const value = side.irr === null ? 'n.a.' : formatPercent(side.irr, 1)
+  const subtitle = 'Net money-weighted return since inception; NAV added as a virtual liquidation'
+
+  if (side.irr === null) {
+    return {
+      title,
+      value,
+      subtitle,
+      steps: [
+        {
+          label: 'Not yet defined',
+          note: 'IRR needs both a contribution (outflow) and a distribution or NAV (inflow) — too early to solve.',
+        },
+      ],
+      checks: [],
+    }
+  }
+
+  // Rebuild the dated net cash flows the solver runs over by walking this side's quarters
+  // up to the clicked one (Δdistributed − Δcontributed). Plain subtraction — no engine here.
+  // Each flow is dated at its calendar-quarter end — the same date the XIRR solves over;
+  // the final (eval) quarter's end is the NAV date.
+  const dateOf = (year: number, q: number) => quarterEndIso({ year, q: q as 1 | 2 | 3 | 4 })
+  let prevP = 0
+  let prevD = 0
+  const flowRows: { cells: string[] }[] = []
+  for (let i = 0; i <= idx; i++) {
+    const s = row === 'plan' ? data[i].forecast : data[i].actual
+    if (!s) continue
+    const cf = s.distributed - prevD - (s.contributed - prevP)
+    prevP = s.contributed
+    prevD = s.distributed
+    flowRows.push({
+      cells: [
+        ql(data[i].quarter.year, data[i].quarter.q),
+        dateOf(data[i].quarter.year, data[i].quarter.q),
+        `${cf >= 0 ? '+' : '−'}${money(Math.abs(cf))}`,
+      ],
+    })
+  }
+  flowRows.push({
+    cells: ['+ NAV (virtual liquidation)', dateOf(ref.year, ref.q), `+${money(side.nav)}`],
+  })
+
+  const breakdown: ExplainBreakdown = {
+    columns: ['Quarter', 'Date', 'Net cash flow (d − p)'],
+    rows: flowRows,
+  }
+
+  return {
+    title,
+    value,
+    subtitle,
+    formula: 'IRR solves Σ CFᵢ / (1 + r)^(daysᵢ / 365) = 0',
+    steps: [
+      {
+        label: 'Contributed (cumulative outflow)',
+        value: money(side.contributed),
+        ref: { year: ref.year, q: ref.q, row, col: 'contributed' },
+      },
+      {
+        label: 'Distributed (cumulative inflow)',
+        value: money(side.distributed),
+        ref: { year: ref.year, q: ref.q, row, col: 'distributed' },
+      },
+      {
+        label: 'NAV (virtual liquidation inflow)',
+        value: money(side.nav),
+        ref: { year: ref.year, q: ref.q, row, col: 'nav' },
+      },
+      { label: 'IRR (XIRR, ACT/365)', value, emphasis: true },
+    ],
+    checks: [],
+    breakdown,
+  }
 }
 
 // ---- amount cells (recurrence: cumulative = previous + this quarter) --------
@@ -306,15 +398,21 @@ function explainDeviation(
 ): Explanation<PerfCellRef> {
   const col = ref.col
   const mult = isMultiple(col)
+  const irr = col === 'irr'
   const dev = quarterDeviation(entry.actual, entry.forecast)
   const dval = col === 'recallable' ? null : (dev[col] as number | null)
 
   const aVal = entry.actual ? cellOf(entry.actual, col) : null
   const fVal = entry.forecast ? cellOf(entry.forecast, col) : null
 
-  const fmt = (x: number | null) => (x === null ? 'n.a.' : mult ? formatMultiple(x) : money(x))
+  const fmt = (x: number | null) =>
+    x === null ? 'n.a.' : irr ? formatPercent(x, 1) : mult ? formatMultiple(x) : money(x)
   const signed = (x: number | null) =>
-    x === null ? 'n.a.' : `${x >= 0 ? '+' : '−'}${mult ? `${Math.abs(x).toFixed(2)}×` : money(Math.abs(x))}`
+    x === null
+      ? 'n.a.'
+      : irr
+        ? `${x >= 0 ? '+' : '−'}${(Math.abs(x) * 100).toFixed(1)}pp`
+        : `${x >= 0 ? '+' : '−'}${mult ? `${Math.abs(x).toFixed(2)}×` : money(Math.abs(x))}`
 
   const steps: ExplainStep<PerfCellRef>[] = [
     {
