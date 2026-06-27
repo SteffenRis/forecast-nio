@@ -9,7 +9,21 @@ import { RoutePlaceholder } from '@/components/common/RoutePlaceholder'
 import { KebabMenu } from '@/components/common/KebabMenu'
 import { Tabs } from '@/components/common/Tabs'
 import { FundFeesOverview } from '@/routes/funds/FundFeesOverview'
+import { FundPolicy } from '@/routes/funds/FundPolicy'
 import { PerformanceGrid } from './PerformanceGrid'
+import { SetVsUpdatedComparison } from './SetVsUpdatedComparison'
+
+type FundTab = 'performance' | 'fees' | 'policy' | 'comparison'
+
+const TAB_HELP: Record<FundTab, string> = {
+  performance:
+    "Compare each quarter's realized actuals against the original plan. Toggle the forecast to reveal the underwriting plan across the fund's life and the deviation (Actual − Forecast) wherever an actual exists.",
+  fees: 'Management fees, expenses, establishment and carried interest for this fund — lifetime totals and an annual breakdown. Click any number to trace its calculation.',
+  policy:
+    'Choose how this fund’s forecast reacts to incoming actuals, and set the active forecast — the baseline the recalibrated forecast is built from.',
+  comparison:
+    'Compare your active forecast against the recalibrated forecast — the active baseline auto-adjusted for actuals under the current policy. It moves only with actuals, not with later plan edits.',
+}
 
 const fieldCls =
   'h-9 rounded-md border border-border-default bg-white px-3 text-[13px] text-body outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100'
@@ -31,7 +45,7 @@ export function PerformancePage() {
 
   // View preference: persists across fund switches (read-only page, no draft state).
   const [showForecast, setShowForecast] = useState(false)
-  const [tab, setTab] = useState<'performance' | 'fees'>('performance')
+  const [tab, setTab] = useState<FundTab>('performance')
 
   const effectiveId = fundOrder.includes(activeId) ? activeId : (fundOrder[0] ?? '')
   const fund = effectiveId ? funds[effectiveId] : undefined
@@ -68,11 +82,7 @@ export function PerformancePage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold tracking-[-0.02em]">Funds</h2>
-          <p className="mt-1 max-w-2xl text-[13px] text-muted">
-            {tab === 'performance'
-              ? "Compare each quarter's realized actuals against the original plan. Toggle the forecast to reveal the underwriting plan across the fund's life and the deviation (Actual − Forecast) wherever an actual exists."
-              : 'Management fees, expenses, establishment and carried interest for this fund — lifetime totals and an annual breakdown. Click any number to trace its calculation.'}
-          </p>
+          <p className="mt-1 max-w-2xl text-[13px] text-muted">{TAB_HELP[tab]}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -135,6 +145,8 @@ export function PerformancePage() {
               tabs={[
                 { id: 'performance', label: 'Plan vs actual' },
                 { id: 'fees', label: 'Fees' },
+                { id: 'policy', label: 'Policy' },
+                { id: 'comparison', label: 'Active vs recalibrated' },
               ]}
               value={tab}
               onChange={setTab}
@@ -152,6 +164,8 @@ export function PerformancePage() {
             />
           )}
           {fund && tab === 'fees' && <FundFeesOverview fundId={effectiveId} dirty={false} />}
+          {fund && tab === 'policy' && <FundPolicy fundId={effectiveId} />}
+          {fund && tab === 'comparison' && <SetVsUpdatedComparison fundId={effectiveId} />}
         </>
       )}
     </RoutePlaceholder>

@@ -1,6 +1,10 @@
 import { newId } from '@/lib/id'
-import { DEFAULT_FEES, DEFAULT_SLIDERS } from './slices/fundsSlice'
+import { DEFAULT_FEES, DEFAULT_POLICY, DEFAULT_SLIDERS } from './slices/fundsSlice'
+import { toFundInput } from './selectors/engineInput'
 import type { Fund, Portfolio, Scenario, Template } from './types'
+
+/** Fixed timestamp for the seed's authored "set forecast" — keeps buildSeed deterministic. */
+const SEED_SET_AT = '2024-02-15T00:00:00.000Z'
 
 /**
  * The CALCULATIONS.md §16 reference example (Acme VII / Nordic FoF), as store
@@ -86,7 +90,11 @@ export function buildSeed(): SeedData {
     },
     overrides: [],
     actuals: [],
+    policy: { ...DEFAULT_POLICY },
   }
+  // Author the "set forecast" baseline from the fund's clean inception inputs (no
+  // actuals), so the seed fund "starts with" a frozen plan to compare against.
+  fund.setForecast = { setAt: SEED_SET_AT, input: toFundInput(fund, template) }
 
   // ---- Portfolio: Nordic FoF (§16) — USD, 1/3 allocation, overlay disabled ----
   const portfolio: Portfolio = {

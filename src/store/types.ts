@@ -5,6 +5,8 @@
 // Calendar quarters are { year, q } to match the engine's CalendarQuarter.
 // ---------------------------------------------------------------------------
 
+import type { FundInputJSON } from '@/engine'
+
 export type IsoDate = string // 'YYYY-MM-DD'
 
 export interface CalendarQuarterRef {
@@ -17,6 +19,18 @@ export type FeeBasis = 'commitment' | 'cost_basis' | 'nav' | 'paid_in'
 export type FundStatus = 'ACTIVE' | 'WOUND_DOWN' | 'ABANDONED'
 export type FxPolicy = 'locked' | 'spot'
 export type Granularity = 'annual' | 'quarterly'
+
+/** How the go-forward forecast reacts when actuals arrive (§7).
+ *  - 'rebase'    : snap the forward curve onto the plan's absolute trajectory (full
+ *                  catch-up in the first forecast quarter). The engine's legacy default.
+ *  - 'scale'     : catch-up gradually to the original terminal (remaining increments
+ *                  scaled by a common factor, relative pacing preserved).
+ *  - 'keep_plan' : remaining increments stay at planned size; the terminal floats. */
+export type ForecastPolicyMode = 'rebase' | 'scale' | 'keep_plan'
+
+export interface ForecastPolicy {
+  mode: ForecastPolicyMode
+}
 
 /** Strategy classification for a template. */
 export type AssetClass =
@@ -108,6 +122,19 @@ export interface ActualsRecord {
   recallableDistributions?: number
 }
 
+/** A frozen "the forecast we started with" — the original underwriting plan.
+ *  It is a fully-resolved engine input (template inlined BY VALUE, actuals removed),
+ *  so re-running the engine on it reproduces the original forecast and is immune to
+ *  later edits of the fund, its template, sliders, fees, or overrides. This is still
+ *  RAW INPUTS — `FundInputJSON` carries zero derived numbers; the forecast itself is
+ *  derived on read by `selectFundSetForecast`. (See ARCHITECTURE.md.) */
+export interface SetForecastSnapshot {
+  /** ISO timestamp the snapshot was set. Descriptive only — never read by the engine. */
+  setAt: string
+  /** The frozen engine input (no actuals). Feed straight to runFundForecast. */
+  input: FundInputJSON
+}
+
 export interface Fund {
   id: string
   name: string
@@ -133,6 +160,10 @@ export interface Fund {
   fees: FeeTerms
   overrides: ForecastOverride[]
   actuals: ActualsRecord[]
+  /** §7 actuals-update policy. Defaults to { mode: 'scale' } when absent. */
+  policy?: ForecastPolicy
+  /** The frozen "set forecast" baseline (the one we started with). Absent until set. */
+  setForecast?: SetForecastSnapshot
 }
 
 // ---- Portfolios ----------------------------------------------------------

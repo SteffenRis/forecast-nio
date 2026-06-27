@@ -2,10 +2,15 @@ import type { SliceCreator } from '../storeState'
 import type {
   ActualsRecord,
   FeeTerms,
+  ForecastPolicy,
+  ForecastPolicyMode,
   Fund,
   FundSliders,
   ForecastOverride,
+  SetForecastSnapshot,
+  Template,
 } from '../types'
+import { toFundInput } from '../selectors/engineInput'
 import { newId } from '@/lib/id'
 
 export interface FundsSlice {
@@ -15,7 +20,9 @@ export interface FundsSlice {
   addFund: (templateId: string, name?: string) => string
   updateFund: (
     id: string,
-    patch: Partial<Omit<Fund, 'id' | 'fees' | 'sliders' | 'overrides' | 'actuals'>>,
+    patch: Partial<
+      Omit<Fund, 'id' | 'fees' | 'sliders' | 'overrides' | 'actuals' | 'policy' | 'setForecast'>
+    >,
   ) => void
   setFundFees: (id: string, patch: Partial<FeeTerms>) => void
   setFundSliders: (id: string, patch: Partial<FundSliders>) => void
@@ -26,12 +33,31 @@ export interface FundsSlice {
 
   setFundOverrides: (id: string, overrides: ForecastOverride[]) => void
   setFundActuals: (id: string, actuals: ActualsRecord[]) => void
+
+  /** Set the §7 actuals-update policy (how the forecast reacts to new actuals). */
+  setFundPolicy: (id: string, mode: ForecastPolicyMode) => void
+  /** Freeze the fund's current forecast inputs as the "set forecast" baseline.
+   *  Captures the actuals-stripped plan; overwrites any existing snapshot. */
+  setFundForecast: (id: string, nowIso?: string) => void
+  /** Drop the frozen set forecast (back to the empty state). */
+  clearFundForecast: (id: string) => void
 }
 
 export const DEFAULT_SLIDERS: FundSliders = {
   dpiMultiplier: 1.0,
   dpiTiming: 0.0,
   concentration: 1.0,
+}
+
+export const DEFAULT_POLICY: ForecastPolicy = { mode: 'scale' }
+
+/** Freeze a fund's resolved engine input as its "set forecast" (actuals removed →
+ *  the original plan). Template is inlined by value, so later template/slider/fee
+ *  edits cannot leak into the frozen baseline. */
+function captureSetForecast(fund: Fund, template: Template, setAt: string): SetForecastSnapshot {
+  const input = toFundInput(fund, template)
+  delete input.actuals
+  return { setAt, input }
 }
 
 /** Spec defaults (§3, §10): IP mgmt on commitment, post-IP on cost_basis, etc. */
@@ -69,7 +95,12 @@ export const createFundsSlice: SliceCreator<FundsSlice> = (set, get) => ({
       fees: { ...DEFAULT_FEES },
       overrides: [],
       actuals: [],
+      policy: { ...DEFAULT_POLICY },
     }
+    // Auto-capture the inception forecast as the baseline so every fund "starts with"
+    // a set forecast (D2). No actuals yet → set forecast == updated forecast initially.
+    const template = get().templates[templateId]
+    if (template) fund.setForecast = captureSetForecast(fund, template, new Date().toISOString())
     set((s) => {
       s.funds[fund.id] = fund
       s.fundOrder.push(fund.id)
@@ -110,14 +141,24 @@ export const createFundsSlice: SliceCreator<FundsSlice> = (set, get) => ({
   duplicateFund: (id) => {
     const src = get().funds[id]
     if (!src) return null
+    const newFundId = newId('fund')
     const copy: Fund = {
       ...src,
-      id: newId('fund'),
+      id: newFundId,
       name: `${src.name} (copy)`,
       sliders: { ...src.sliders },
       fees: { ...src.fees },
       overrides: src.overrides.map((o) => ({ ...o, quarter: { ...o.quarter } })),
       actuals: src.actuals.map((a) => ({ ...a, quarter: { ...a.quarter } })),
+      ...(src.policy ? { policy: { ...src.policy } } : {}),
+      ...(src.setForecast
+        ? {
+            setForecast: {
+              setAt: src.setForecast.setAt,
+              input: { ...src.setForecast.input, id: newFundId },
+            },
+          }
+        : {}),
     }
     set((s) => {
       s.funds[copy.id] = copy
@@ -136,5 +177,30 @@ export const createFundsSlice: SliceCreator<FundsSlice> = (set, get) => ({
     set((s) => {
       const f = s.funds[id]
       if (f) f.actuals = actuals
+    }),
+
+  setFundPolicy: (id, mode) =>
+    set((s) => {
+      const f = s.funds[id]
+      if (f) f.policy = { mode }
+    }),
+
+  setFundForecast: (id, nowIso) => {
+    const st = get()
+    const f = st.funds[id]
+    if (!f) return
+    const t = st.templates[f.templateId]
+    if (!t) return
+    const snap = captureSetForecast(f, t, nowIso ?? new Date().toISOString())
+    set((s) => {
+      const ff = s.funds[id]
+      if (ff) ff.setForecast = snap
+    })
+  },
+
+  clearFundForecast: (id) =>
+    set((s) => {
+      const f = s.funds[id]
+      if (f) f.setForecast = undefined
     }),
 })

@@ -7,9 +7,6 @@ import {
   runFundForecast,
   runFundFeeTrace,
   runPortfolioForecast,
-  type ActualRecord,
-  type FeeParams,
-  type ForecastOverrides,
   type FundFeeTrace,
   type FundForecastResult,
   type FundInputJSON,
@@ -17,97 +14,23 @@ import {
   type OverlayParams,
   type PortfolioForecastResult,
   type PortfolioInputJSON,
-  type TemplateInput,
 } from '@/engine'
 import { useStore } from '..'
 import type { StoreState } from '../storeState'
 import type {
-  ForecastOverride,
   Fund,
   OverlayParams as StoreOverlay,
   Portfolio,
   PulledRate,
+  SetForecastSnapshot,
   Template,
 } from '../types'
 import { quarterOfIso, quarterOrdinal } from '@/lib/quarter'
+import { toActualsAt, toFundInput } from './engineInput'
 
-// ---- mapping: store entities → engine JSON inputs ------------------------
-
-function toTemplateInput(t: Template): TemplateInput {
-  return {
-    granularity: t.granularity,
-    scenarios: t.scenarioOrder.map((id) => {
-      const scn = t.scenarios[id]
-      return {
-        id: scn.id,
-        isBase: scn.isBase,
-        pic: { points: scn.pic.map((p) => ({ period: p.periodIndex, value: p.value })) },
-        dpi: { points: scn.dpi.map((p) => ({ period: p.periodIndex, value: p.value })) },
-        tvpi: { points: scn.tvpi.map((p) => ({ period: p.periodIndex, value: p.value })) },
-      }
-    }),
-  }
-}
-
-function toFeeParams(f: Fund): FeeParams {
-  const x = f.fees
-  return {
-    mgmtRateIP: x.mgmtRateIp,
-    mgmtRatePostIP: x.mgmtRatePostIp,
-    mgmtBasisIP: x.mgmtBasisIp,
-    mgmtBasisPostIP: x.mgmtBasisPostIp,
-    expenseRateIP: x.expenseRateIp,
-    expenseRatePostIP: x.expenseRatePostIp,
-    expenseBasisIP: x.expenseBasisIp,
-    expenseBasisPostIP: x.expenseBasisPostIp,
-    establishmentRate: x.establishmentRate,
-    carryRate: x.carryRate,
-    hurdleAnnual: x.hurdleAnnual,
-    catchUp: x.catchUp,
-  }
-}
-
-function toOverrides(list: ForecastOverride[]): ForecastOverrides | undefined {
-  if (list.length === 0) return undefined
-  const out: ForecastOverrides = {}
-  for (const o of list) {
-    const arr = (out[o.curve] ??= [])
-    arr.push({ quarter: { year: o.quarter.year, q: o.quarter.q }, value: o.value })
-  }
-  return out
-}
-
-function toActuals(f: Fund): ActualRecord[] | undefined {
-  if (f.actuals.length === 0) return undefined
-  return f.actuals.map((a) => ({
-    quarter: { year: a.quarter.year, q: a.quarter.q },
-    cumulativePaidIn: a.cumulativePaidIn,
-    cumulativeDistributions: a.cumulativeDistributions,
-    nav: a.nav,
-    ...(a.recallableDistributions !== undefined
-      ? { recallableBalance: a.recallableDistributions }
-      : {}),
-  }))
-}
-
-function toFundInput(f: Fund, t: Template): FundInputJSON {
-  return {
-    id: f.id,
-    name: f.name,
-    commitment: f.commitment,
-    currency: f.currency,
-    effectiveDate: f.effectiveDate,
-    investmentPeriodEnd: f.fees.investmentPeriodEnd,
-    standardLiquidationDate: f.standardLiquidationDate,
-    ...(f.expectedLiquidationDate ? { expectedLiquidationDate: f.expectedLiquidationDate } : {}),
-    template: toTemplateInput(t),
-    sliders: { ...f.sliders },
-    fees: toFeeParams(f),
-    ...(toOverrides(f.overrides) ? { overrides: toOverrides(f.overrides) } : {}),
-    ...(toActuals(f) ? { actuals: toActuals(f) } : {}),
-    status: f.status,
-  }
-}
+// Store→engine input mappers (`toFundInput` et al.) live in `./engineInput` so the
+// funds slice can reuse them to freeze a "set forecast" snapshot without importing
+// this React-aware module.
 
 /** Build the engine FxTable from three layers (low → high precedence per quarter):
  *  - `rates`: the portfolio's manual flat rates (last-resort fallback).
@@ -232,6 +155,8 @@ function depsEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
 
 const fundCache = new Map<string, { deps: unknown[]; result: FundForecastResult }>()
 const baselineCache = new Map<string, { deps: unknown[]; result: FundForecastResult }>()
+const setForecastCache = new Map<string, { deps: unknown[]; result: FundForecastResult }>()
+const recalibratedCache = new Map<string, { deps: unknown[]; result: FundForecastResult }>()
 const feeTraceCache = new Map<string, { deps: unknown[]; result: FundFeeTrace }>()
 const portfolioCache = new Map<string, { deps: unknown[]; result: PortfolioForecastResult }>()
 
@@ -266,6 +191,38 @@ function forecastFundBaseline(f: Fund, t: Template): FundForecastResult {
   delete baseInput.actuals
   const result = runFundForecast(baseInput)
   baselineCache.set(f.id, { deps, result })
+  return result
+}
+
+/** The fund's frozen "set forecast" — derived from the captured snapshot input, not
+ *  from the live fund/template. Memoized by the snapshot's object identity, so the
+ *  result stays referentially stable across unrelated edits (the frozen guarantee). */
+function forecastSetSnapshot(fundId: string, snap: SetForecastSnapshot): FundForecastResult {
+  const deps = [snap]
+  const hit = setForecastCache.get(fundId)
+  if (hit && depsEqual(hit.deps, deps)) return hit.result
+  const result = runFundForecast(snap.input)
+  setForecastCache.set(fundId, { deps, result })
+  return result
+}
+
+/** The fund's "recalibrated forecast" — the frozen ACTIVE forecast (set snapshot)
+ *  recalibrated by the fund's CURRENT actuals + policy. It is anchored to the
+ *  baseline plan: later edits to live sliders/fees/template do NOT move it (only a
+ *  re-set of the active forecast does), so it drifts purely with actuals. Memoized on
+ *  [snapshot, actuals, policy] → auto-tracks actuals, stable otherwise. */
+function forecastRecalibrated(fund: Fund, snap: SetForecastSnapshot): FundForecastResult {
+  const deps = [snap, fund.actuals, fund.policy]
+  const hit = recalibratedCache.get(fund.id)
+  if (hit && depsEqual(hit.deps, deps)) return hit.result
+  const input: FundInputJSON = { ...snap.input }
+  // Translate against the snapshot's effective date — the date its engine run uses.
+  const actuals = toActualsAt(fund.actuals, snap.input.effectiveDate)
+  if (actuals) input.actuals = actuals
+  else delete input.actuals
+  if (fund.policy) input.policy = fund.policy.mode
+  const result = runFundForecast(input)
+  recalibratedCache.set(fund.id, { deps, result })
   return result
 }
 
@@ -341,6 +298,28 @@ export function selectFundBaselineForecast(
   return forecastFundBaseline(fund, template)
 }
 
+/** The frozen "set forecast" (the original plan we started with), or null until set.
+ *  Contrast with selectFundForecast — the live "updated forecast with actuals". */
+export function selectFundSetForecast(
+  s: StoreState,
+  fundId: string,
+): FundForecastResult | null {
+  const fund = s.funds[fundId]
+  if (!fund?.setForecast) return null
+  return forecastSetSnapshot(fundId, fund.setForecast)
+}
+
+/** The recalibrated forecast: the frozen active forecast + the fund's current actuals
+ *  (via its policy). Null until an active/set forecast exists. See forecastRecalibrated. */
+export function selectFundRecalibratedForecast(
+  s: StoreState,
+  fundId: string,
+): FundForecastResult | null {
+  const fund = s.funds[fundId]
+  if (!fund?.setForecast) return null
+  return forecastRecalibrated(fund, fund.setForecast)
+}
+
 export function selectPortfolioForecast(
   s: StoreState,
   portfolioId: string,
@@ -373,6 +352,16 @@ export function useFundFeeTrace(fundId: string): FundFeeTrace | null {
 /** Memoized baseline plan (forecast with actuals stripped). */
 export function useFundBaselineForecast(fundId: string): FundForecastResult | null {
   return useStore((s) => selectFundBaselineForecast(s, fundId))
+}
+
+/** Memoized frozen "set forecast" (the original plan), null until the user has set it. */
+export function useFundSetForecast(fundId: string): FundForecastResult | null {
+  return useStore((s) => selectFundSetForecast(s, fundId))
+}
+
+/** Memoized recalibrated forecast (active forecast + current actuals via policy). */
+export function useFundRecalibratedForecast(fundId: string): FundForecastResult | null {
+  return useStore((s) => selectFundRecalibratedForecast(s, fundId))
 }
 
 /** Memoized portfolio forecast (with optional LP overlay). */
