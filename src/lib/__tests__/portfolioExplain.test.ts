@@ -15,6 +15,7 @@ const amt = (
   distributed,
   recallable,
   nav,
+  irr: null,
   multiples: fundMultiples({ commitment: 30_000_000, paidIn: contributed, distributed, nav }),
 })
 const qc = (

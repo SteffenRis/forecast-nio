@@ -35,6 +35,7 @@ const COL_LABEL: Record<PerfColumn, string> = {
   dpi: 'DPI',
   rvpi: 'RVPI',
   tvpi: 'TVPI',
+  irr: 'IRR',
 }
 const ROW_LABEL: Record<PerfRowKind, string> = { plan: 'Plan', actual: 'Actual', deviation: 'Δ' }
 const isMultiple = (c: PerfColumn): boolean =>
@@ -83,8 +84,9 @@ export function explainPortfolioCell(
   reportingCurrency: string,
   funds: FundDecomp[],
 ): Explanation<PerfCellRef> {
-  // Multiples are ratios — they don't sum across funds; keep the standard ratio trace.
-  if (isMultiple(ref.col)) {
+  // Multiples are ratios and IRR is a money-weighted solve — neither sums across funds;
+  // keep the standard (aggregate-level) trace rather than a per-fund decomposition.
+  if (isMultiple(ref.col) || ref.col === 'irr') {
     return explainPerfCell(aggregate, ref, totalCommitment, reportingCurrency)
   }
 

@@ -279,6 +279,13 @@ export function selectFundFeeTrace(s: StoreState, fundId: string): FundFeeTrace 
   return feeTraceFund(fund, template)
 }
 
+/** Baseline plan for an arbitrary fund + template — e.g. an unsaved editor draft
+ *  not yet in the store. Same engine + per-id memoization as the store-bound
+ *  selector below; takes objects so a live draft can preview its forecast. */
+export function selectBaselineForecastFor(fund: Fund, template: Template): FundForecastResult {
+  return forecastFundBaseline(fund, template)
+}
+
 /** The baseline plan (forecast with actuals stripped) — see forecastFundBaseline. */
 export function selectFundBaselineForecast(
   s: StoreState,

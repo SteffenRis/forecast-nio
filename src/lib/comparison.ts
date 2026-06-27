@@ -1,11 +1,14 @@
 // Pure plan-vs-actual reshaping for the Performance screen. Takes the baseline
 // forecast rows (engine output) + the fund's actuals and produces one comparison
-// entry per calendar quarter. No engine/React/store-runtime imports — only types
-// and the metrics/quarter helpers — so it stays trivially unit-testable.
+// entry per calendar quarter. The one deliberate engine dependency is the §14 XIRR
+// solver (`xirrFromFlows`), reused — not reimplemented — to compute the since-inception
+// IRR per quarter; everything else is types + the metrics/quarter helpers, so it stays
+// trivially unit-testable.
 
 import type { CalendarQuarterRef } from '@/store/types'
+import { xirrFromFlows, type DatedFlow } from '@/engine/irr'
 import { fundMultiples, type FundMultiples } from './metrics'
-import { quarterFromOrdinal, quarterOfIso, quarterOrdinal } from './quarter'
+import { quarterEndIso, quarterFromOrdinal, quarterOfIso, quarterOrdinal } from './quarter'
 
 /** Minimal forecast-row shape — structurally satisfied by the engine's
  *  FundQuarterRowJSON (whose `quarter.q` is the wider `number`). NOTE: `pNet`/`dNet`
@@ -29,13 +32,38 @@ export interface ActualRow {
 }
 
 /** One side (actual or plan) of a quarter: cumulative amounts + PE multiples.
- *  `recallable` is null when not modeled — the plan never forecasts recallables. */
+ *  `recallable` is null when not modeled — the plan never forecasts recallables.
+ *  `irr` is the since-inception, money-weighted return (XIRR) as of this quarter —
+ *  null until the cash flows have a sign change (mirrors how multiples are n.a. early). */
 export interface QuarterAmounts {
   contributed: number
   distributed: number
   recallable: number | null
   nav: number
+  irr: number | null
   multiples: FundMultiples
+}
+
+/** Since-inception money-weighted IRR (XIRR) as of the last entry of `seq`. `seq` is the
+ *  ordered cumulative paid-in/distributed per quarter (oldest → newest); `navAtEval` is the
+ *  latest quarter's NAV, added to the final flow as a virtual liquidation. Net cash flow per
+ *  quarter is Δdistributed − Δcontributed, dated at the quarter end. Returns null on the
+ *  engine's §14 edge cases (fewer than two sign-changing flows). */
+export function irrToDate(
+  seq: { quarter: CalendarQuarterRef; contributed: number; distributed: number }[],
+  navAtEval: number,
+): number | null {
+  if (seq.length === 0) return null
+  let prevP = 0
+  let prevD = 0
+  const flows: DatedFlow[] = seq.map((s) => {
+    const amount = s.distributed - prevD - (s.contributed - prevP)
+    prevP = s.contributed
+    prevD = s.distributed
+    return { date: new Date(quarterEndIso(s.quarter)), amount }
+  })
+  flows[flows.length - 1].amount += navAtEval
+  return xirrFromFlows(flows)
 }
 
 export interface QuarterComparison {
@@ -48,8 +76,8 @@ export interface QuarterComparison {
  *  QuarterAmounts, keyed by calendar-quarter ordinal. Each row i is re-anchored to
  *  effectiveDate's quarter + i (the engine emits a gap-free quarterly curve, so this
  *  is a uniform shift that keeps quarters consecutive). `recallable` is always null —
- *  the plan never forecasts recallables. Shared by the plan-vs-actual and
- *  set-vs-updated comparisons. */
+ *  the plan never forecasts recallables — and `irr` is the since-inception XIRR as of
+ *  each quarter. Shared by the plan-vs-actual and set-vs-updated comparisons. */
 export function cumulativeForecastByOrdinal(input: {
   commitment: number
   effectiveDate: string
@@ -68,16 +96,21 @@ export function cumulativeForecastByOrdinal(input: {
       nav: r.nav,
     }))
     .sort((a, b) => a.srcOrd - b.srcOrd)
+  // Running cumulative series, fed quarter-by-quarter to the since-inception IRR.
+  const planSeq: { quarter: CalendarQuarterRef; contributed: number; distributed: number }[] = []
   orderedRows.forEach((row, i) => {
     cumP += row.pNet
     cumD += row.dNet
     const ord = baseOrd + i
-    quarterByOrd.set(ord, quarterFromOrdinal(ord))
+    const quarter = quarterFromOrdinal(ord)
+    planSeq.push({ quarter, contributed: cumP, distributed: cumD })
+    quarterByOrd.set(ord, quarter)
     byOrd.set(ord, {
       contributed: cumP,
       distributed: cumD,
       recallable: null,
       nav: row.nav,
+      irr: irrToDate(planSeq, row.nav),
       multiples: fundMultiples({ commitment: input.commitment, paidIn: cumP, distributed: cumD, nav: row.nav }),
     })
   })
@@ -98,24 +131,35 @@ export function buildFundComparison(input: {
 }): QuarterComparison[] {
   const { commitment, effectiveDate, actuals, forecastRows } = input
 
-  // Plan side: prefix-sum periodic flows into cumulative stocks, re-anchored to the
-  // fund's effective-date quarter (forecast row i → effective-date quarter + i).
+  // Plan side: prefix-sum periodic flows into cumulative stocks (with since-inception
+  // IRR per quarter), re-anchored to the fund's effective-date quarter.
   const { byOrd: forecastByOrd, quarterByOrd } = cumulativeForecastByOrdinal({
     commitment,
     effectiveDate,
     rows: forecastRows,
   })
 
-  // Actual side: amounts are already cumulative-to-date.
+  // Actual side: amounts are already cumulative-to-date. Sort chronologically so the
+  // since-inception IRR sees the flows in order (other fields are order-independent).
   const actualByOrd = new Map<number, QuarterAmounts>()
-  for (const a of actuals) {
+  const actualSeq: { quarter: CalendarQuarterRef; contributed: number; distributed: number }[] = []
+  const sortedActuals = [...actuals].sort(
+    (a, b) => quarterOrdinal(a.quarter) - quarterOrdinal(b.quarter),
+  )
+  for (const a of sortedActuals) {
     const ord = quarterOrdinal(a.quarter)
     quarterByOrd.set(ord, a.quarter)
+    actualSeq.push({
+      quarter: a.quarter,
+      contributed: a.cumulativePaidIn,
+      distributed: a.cumulativeDistributions,
+    })
     actualByOrd.set(ord, {
       contributed: a.cumulativePaidIn,
       distributed: a.cumulativeDistributions,
       recallable: a.recallableDistributions ?? null,
       nav: a.nav,
+      irr: irrToDate(actualSeq, a.nav),
       multiples: fundMultiples({
         commitment,
         paidIn: a.cumulativePaidIn,
@@ -213,11 +257,12 @@ export function buildPortfolioComparison(input: {
     actualSeries.push(actual)
   }
 
-  const toAmounts = (s: CumulativeSide): QuarterAmounts => ({
+  const toAmounts = (s: CumulativeSide, irr: number | null): QuarterAmounts => ({
     contributed: s.contributed,
     distributed: s.distributed,
     recallable: s.recallable,
     nav: s.nav,
+    irr,
     multiples: fundMultiples({
       commitment: totalCommitment,
       paidIn: s.contributed,
@@ -226,8 +271,15 @@ export function buildPortfolioComparison(input: {
     }),
   })
 
+  // Running aggregated cumulative series — the IRR of the summed net cash-flow stream is
+  // the portfolio's money-weighted IRR to date. `ords` is ascending, so we accumulate here.
+  const planIrrSeq: { quarter: CalendarQuarterRef; contributed: number; distributed: number }[] = []
+  const actualIrrSeq: { quarter: CalendarQuarterRef; contributed: number; distributed: number }[] = []
+
   const ords = [...quarterByOrd.keys()].sort((a, b) => a - b)
   return ords.map((ord) => {
+    const quarter = quarterByOrd.get(ord)!
+
     let planHas = false
     const plan: CumulativeSide = { contributed: 0, distributed: 0, nav: 0, recallable: null }
     for (const s of planSeries) {
@@ -238,6 +290,11 @@ export function buildPortfolioComparison(input: {
         plan.distributed += v.distributed
         plan.nav += v.nav
       }
+    }
+    let planIrr: number | null = null
+    if (planHas) {
+      planIrrSeq.push({ quarter, contributed: plan.contributed, distributed: plan.distributed })
+      planIrr = irrToDate(planIrrSeq, plan.nav)
     }
 
     let actualHas = false
@@ -254,11 +311,16 @@ export function buildPortfolioComparison(input: {
         }
       }
     }
+    let actualIrr: number | null = null
+    if (actualHas) {
+      actualIrrSeq.push({ quarter, contributed: actual.contributed, distributed: actual.distributed })
+      actualIrr = irrToDate(actualIrrSeq, actual.nav)
+    }
 
     return {
-      quarter: quarterByOrd.get(ord)!,
-      actual: actualHas ? toAmounts(actual) : null,
-      forecast: planHas ? toAmounts(plan) : null,
+      quarter,
+      actual: actualHas ? toAmounts(actual, actualIrr) : null,
+      forecast: planHas ? toAmounts(plan, planIrr) : null,
     }
   })
 }
@@ -274,6 +336,7 @@ export interface QuarterDeviation {
   dpi: number | null
   rvpi: number | null
   tvpi: number | null
+  irr: number | null
 }
 
 export function quarterDeviation(
@@ -291,5 +354,6 @@ export function quarterDeviation(
     dpi: diff(actual?.multiples.dpi, forecast?.multiples.dpi),
     rvpi: diff(actual?.multiples.rvpi, forecast?.multiples.rvpi),
     tvpi: diff(actual?.multiples.tvpi, forecast?.multiples.tvpi),
+    irr: diff(actual?.irr, forecast?.irr),
   }
 }

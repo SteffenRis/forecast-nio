@@ -23,6 +23,7 @@ function amt(
     distributed,
     recallable,
     nav,
+    irr: null,
     multiples: fundMultiples({ commitment, paidIn: contributed, distributed, nav }),
   }
 }

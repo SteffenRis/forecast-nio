@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Check } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { addYearsIso, formatMoneyCompact } from '@/lib/format'
 import { assetClassLabel } from '@/lib/assetClass'
@@ -8,14 +9,53 @@ import type { FeeBasis, Fund, Template } from '@/store/types'
 import { NumberInput } from '@/components/common/NumberInput'
 import { DateInput } from '@/components/common/DateInput'
 import { Toggle } from '@/components/common/Toggle'
+import { Slider } from '@/components/common/Slider'
+import { DEFAULT_SLIDERS } from '@/store/slices/fundsSlice'
+import { selectBaselineForecastFor } from '@/store/selectors/forecast'
+import { buildFundComparison } from '@/lib/comparison'
+import { PerformanceGrid } from '@/routes/performance/PerformanceGrid'
 
 const textField =
   'h-9 w-full rounded-md border border-border-default bg-white px-3 text-[13px] text-body outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100'
 const selectField = cn(textField, 'pr-8')
 const card = 'rounded-xl border border-border-default bg-white p-5 shadow-sm'
 const grid2 = 'grid grid-cols-1 gap-4 sm:grid-cols-2'
+const navBtnPrimary =
+  'rounded-md bg-brand-navy px-4 py-1.5 text-[13px] font-semibold text-white hover:opacity-90'
+const navBtnSecondary =
+  'rounded-md border border-border-default bg-white px-3 py-1.5 text-[13px] font-medium text-body hover:bg-slate-50'
 
 const DEFAULT_LIFE = 10
+
+const FORM_STEPS = ['Details', 'Profile shaping'] as const
+
+/** Two-step progress indicator for the fund form. `current` is 1-based. */
+function FormStepper({ current }: { current: 1 | 2 }) {
+  return (
+    <ol className="flex items-center gap-2 text-[13px]">
+      {FORM_STEPS.map((label, i) => {
+        const step = i + 1
+        const done = step < current
+        const active = step === current
+        return (
+          <li key={label} className="flex items-center gap-2">
+            <span
+              className={cn(
+                'grid size-6 place-items-center rounded-full text-[11px] font-semibold',
+                (done || active) && 'bg-brand-navy text-white',
+                !done && !active && 'border border-border-default bg-white text-muted',
+              )}
+            >
+              {done ? <Check className="size-3.5" strokeWidth={2.5} /> : step}
+            </span>
+            <span className={cn('font-medium', active ? 'text-body' : 'text-muted')}>{label}</span>
+            {step < FORM_STEPS.length && <span className="mx-1 h-px w-8 bg-border-default" />}
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
 
 type BasisKey = 'mgmtBasisIp' | 'mgmtBasisPostIp' | 'expenseBasisIp' | 'expenseBasisPostIp'
 
@@ -110,6 +150,46 @@ function MoneyField({
   )
 }
 
+/** Range slider with an uppercase label, a live readout, and end labels. */
+function SliderField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  readout,
+  leftLabel,
+  rightLabel,
+  helper,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (n: number) => void
+  readout: string
+  leftLabel: string
+  rightLabel: string
+  helper?: string
+}) {
+  return (
+    <div className="block">
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+        <span className="text-[13px] font-semibold tabular-nums text-body">{readout}</span>
+      </div>
+      <Slider value={value} min={min} max={max} step={step} onChange={onChange} ariaLabel={label} />
+      <div className="mt-1 flex justify-between text-[10px] text-muted">
+        <span>{leftLabel}</span>
+        <span>{rightLabel}</span>
+      </div>
+      {helper && <p className="mt-1.5 text-[11px] leading-snug text-muted">{helper}</p>}
+    </div>
+  )
+}
+
 interface Props {
   fund: Fund
   templates: Record<string, Template>
@@ -129,6 +209,11 @@ export function FundEditor({
   onSave,
   onDiscard,
 }: Props) {
+  // Wizard page: 1 = Details, 2 = Profile shaping. Resets to 1 on remount (per fund).
+  const [page, setPage] = useState<1 | 2>(1)
+  // Forecast-preview scenario on page 2 ('' = base scenario default).
+  const [scenarioId, setScenarioId] = useState('')
+
   // Cmd/Ctrl+S saves when there are pending changes.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -143,6 +228,23 @@ export function FundEditor({
 
   const template = templates[fund.templateId]
   const lifeOf = (templateId: string) => templates[templateId]?.fundLifeYears ?? DEFAULT_LIFE
+
+  // Live forecast preview for the draft (page 2). Recomputes whenever the draft's
+  // reference changes (immer hands back a new fund on every slider tick) or the
+  // selected scenario changes — mirrors PerformancePage's baseline-plan assembly.
+  const forecastData = useMemo(() => {
+    if (!template) return []
+    const baseline = selectBaselineForecastFor(fund, template)
+    const wantId = scenarioId || template.baseScenarioId
+    const scenario =
+      baseline.scenarios.find((sc) => sc.scenarioId === wantId) ?? baseline.scenarios[0]
+    return buildFundComparison({
+      commitment: fund.commitment,
+      effectiveDate: fund.effectiveDate,
+      actuals: fund.actuals,
+      forecastRows: scenario?.rows ?? [],
+    })
+  }, [fund, template, scenarioId])
 
   // Basis <select> bound to one of the four FeeBasis keys.
   function basisSelect(key: BasisKey, label: string) {
@@ -203,6 +305,11 @@ export function FundEditor({
         </div>
       </div>
 
+      {/* Step indicator */}
+      <FormStepper current={page} />
+
+      {page === 1 && (
+        <>
       {/* Identity */}
       <div className={card}>
         <SectionHeader title="Identity" sub="How the fund and its manager are named." />
@@ -346,6 +453,124 @@ export function FundEditor({
         </div>
       </div>
 
+        </>
+      )}
+
+      {page === 2 && (
+        <>
+      {/* Profile shaping */}
+      <div className={card}>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Profile shaping
+            </h3>
+            <p className="mt-0.5 text-[12px] text-muted">
+              Tune the template's scenarios for this fund. The base case is untouched by
+              concentration.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => update((d) => { d.sliders = { ...DEFAULT_SLIDERS } })}
+            className="shrink-0 rounded-md border border-border-default bg-white px-2.5 py-1 text-[11px] font-medium text-muted hover:bg-slate-50"
+          >
+            Reset to template
+          </button>
+        </div>
+        <div className={grid2}>
+          <SliderField
+            label="Concentration index"
+            value={fund.sliders.concentration}
+            min={0}
+            max={2}
+            step={0.05}
+            onChange={(n) => update((d) => { d.sliders.concentration = n })}
+            readout={`${fund.sliders.concentration.toFixed(2)}×`}
+            leftLabel="Tight (0)"
+            rightLabel="Wide (2)"
+            helper="Spread of the Low/High scenarios around the base. Higher = more volatile; the base case is unchanged."
+          />
+          <SliderField
+            label="Cash-flow timing"
+            value={fund.sliders.dpiTiming}
+            min={-1}
+            max={1}
+            step={0.05}
+            onChange={(n) => update((d) => { d.sliders.dpiTiming = n })}
+            readout={
+              fund.sliders.dpiTiming === 0
+                ? 'Neutral'
+                : fund.sliders.dpiTiming < 0
+                  ? `Front-loaded (${fund.sliders.dpiTiming.toFixed(2)})`
+                  : `Back-loaded (+${fund.sliders.dpiTiming.toFixed(2)})`
+            }
+            leftLabel="Front-loaded (−1)"
+            rightLabel="Back-loaded (+1)"
+            helper="Pulls distributions earlier (front) or later (back) across all scenarios. Terminal DPI unchanged."
+          />
+          <SliderField
+            label="Ultimate DPI multiplier"
+            value={fund.sliders.dpiMultiplier}
+            min={0.5}
+            max={2}
+            step={0.05}
+            onChange={(n) => update((d) => { d.sliders.dpiMultiplier = n })}
+            readout={`${fund.sliders.dpiMultiplier.toFixed(2)}×`}
+            leftLabel="0.5×"
+            rightLabel="2.0×"
+            helper="Scales every scenario's DPI up or down. 1.00× = the template as drawn."
+          />
+        </div>
+      </div>
+
+      {/* Forecast preview — reuses the Performance grid, driven by the live draft */}
+      {template && (
+        <div>
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Forecast preview
+              </h3>
+              <p className="mt-0.5 max-w-xl text-[12px] text-muted">
+                How these knobs reshape the plan. Pick a scenario to see the concentration
+                slider's effect on the Low/High cases.
+              </p>
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Scenario
+              </span>
+              <select
+                className={cn(selectField, 'min-w-[180px]')}
+                value={scenarioId || template.baseScenarioId}
+                onChange={(e) => setScenarioId(e.target.value)}
+                aria-label="Forecast scenario"
+              >
+                {template.scenarioOrder.map((id) => (
+                  <option key={id} value={id}>
+                    {template.scenarios[id]?.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <PerformanceGrid
+            currency={fund.currency}
+            data={forecastData}
+            showForecast
+            onToggleForecast={() => {}}
+            hideToggle
+            title="Plan"
+          />
+        </div>
+      )}
+
+        </>
+      )}
+
+      {page === 1 && (
+        <>
       {/* Management Fees & Expenses */}
       <div className={card}>
         <SectionHeader
@@ -421,6 +646,24 @@ export function FundEditor({
             className="mt-0.5"
           />
         </div>
+      </div>
+        </>
+      )}
+
+      {/* Page navigation */}
+      <div className="flex items-center justify-between">
+        {page === 2 ? (
+          <button type="button" className={navBtnSecondary} onClick={() => setPage(1)}>
+            ← Back
+          </button>
+        ) : (
+          <span />
+        )}
+        {page === 1 && (
+          <button type="button" className={navBtnPrimary} onClick={() => setPage(2)}>
+            Next: Profile shaping →
+          </button>
+        )}
       </div>
     </div>
   )

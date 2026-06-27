@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { cn } from '@/lib/cn'
 import { currencySymbol } from '@/lib/currency'
 import { quarterLabel } from '@/lib/quarter'
+import { formatPercent } from '@/lib/format'
 import { formatMultiple } from '@/lib/metrics'
 import {
   quarterDeviation,
@@ -24,6 +25,7 @@ const PERF_COLS: PerfColumn[] = [
   'dpi',
   'rvpi',
   'tvpi',
+  'irr',
 ]
 
 const card = 'rounded-xl border border-border-default bg-white p-5 shadow-sm'
@@ -36,13 +38,18 @@ const fmtDelta = (n: number | null) =>
   n === null ? DASH : `${n >= 0 ? '+' : '−'}${Math.round(Math.abs(n)).toLocaleString('en-US')}`
 const fmtMultipleDelta = (v: number | null) =>
   v === null ? 'n.a.' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}×`
+/** Since-inception IRR: a fraction (0.124 → "12.4%"); n.a. before a sign change. */
+const fmtIrr = (v: number | null) => (v === null ? 'n.a.' : formatPercent(v, 1))
+/** IRR deviation in percentage points, e.g. +2.1pp / −1.3pp; n.a. when a side is null. */
+const fmtIrrDelta = (v: number | null) =>
+  v === null ? 'n.a.' : `${v >= 0 ? '+' : '−'}${(Math.abs(v) * 100).toFixed(1)}pp`
 
 /** Sign tint for deviation cells. "Good vs bad" is metric-dependent, so this is a
  *  neutral above/below-plan signal, not a judgment. */
 const toneClass = (n: number | null): string =>
   n === null ? 'text-slate-300' : n > 0 ? 'text-positive' : n < 0 ? 'text-negative' : 'text-muted'
 
-const VALUE_COLS = ['Contributed', 'Distributed', 'Recallable', 'NAV', 'PIC', 'DPI', 'RVPI', 'TVPI']
+const VALUE_COLS = ['Contributed', 'Distributed', 'Recallable', 'NAV', 'PIC', 'DPI', 'RVPI', 'TVPI', 'IRR']
 const DIVIDER_AT = 4 // left divider before PIC separates amounts from multiples
 
 interface ValueCell {
@@ -61,6 +68,7 @@ function planCells(f: QuarterAmounts): ValueCell[] {
     { text: formatMultiple(f.multiples.dpi), className: tint },
     { text: formatMultiple(f.multiples.rvpi), className: tint },
     { text: formatMultiple(f.multiples.tvpi), className: tint },
+    { text: fmtIrr(f.irr), className: f.irr === null ? 'text-slate-300' : tint },
   ]
 }
 
@@ -75,6 +83,7 @@ function actualCells(a: QuarterAmounts): ValueCell[] {
     { text: formatMultiple(a.multiples.dpi), className: tint },
     { text: formatMultiple(a.multiples.rvpi), className: tint },
     { text: formatMultiple(a.multiples.tvpi), className: tint },
+    { text: fmtIrr(a.irr), className: a.irr === null ? 'text-slate-300' : tint },
   ]
 }
 
@@ -88,6 +97,7 @@ function deviationCells(d: QuarterDeviation): ValueCell[] {
     { text: fmtMultipleDelta(d.dpi), className: toneClass(d.dpi) },
     { text: fmtMultipleDelta(d.rvpi), className: toneClass(d.rvpi) },
     { text: fmtMultipleDelta(d.tvpi), className: toneClass(d.tvpi) },
+    { text: fmtIrrDelta(d.irr), className: toneClass(d.irr) },
   ]
 }
 
