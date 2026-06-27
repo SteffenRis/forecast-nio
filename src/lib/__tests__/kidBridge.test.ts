@@ -4,6 +4,9 @@ import {
   allocateWaterfallCosts,
   buildKidView,
   computeIrrWaterfall,
+  insertTransactionCostRow,
+  OUR_MGMT_LABEL,
+  TXN_LABEL,
   type KidScenarioInput,
   type KidStageInputRow,
 } from '../kidBridge'
@@ -91,6 +94,52 @@ describe('allocateWaterfallCosts', () => {
     expect(rows.filter((r) => r.kind === 'fee').every((r) => r.costAllocation === null)).toBe(true)
     expect(rows.find((r) => r.kind === 'end')!.costAllocation).toBeCloseTo(5000, 6)
   })
+
+  it('reserves the txn line cost and splits the remainder; all costs sum to total', () => {
+    const rows = allocateWaterfallCosts(
+      insertTransactionCostRow(computeIrrWaterfall([0.2, 0.18, 0.16, 0.15, 0.13, 0.11])),
+      8000,
+      2000, // reservedByTxn
+    )
+    const txn = rows.find((r) => r.kind === 'txn')!
+    expect(txn.costAllocation).toBeCloseTo(2000, 6)
+    // Drag rows split the remaining 6000 (8000 − 2000) pro-rata; txn + fees == 8000.
+    const feeSum = rows
+      .filter((r) => r.kind === 'fee')
+      .reduce((a, r) => a + (r.costAllocation ?? 0), 0)
+    expect(feeSum).toBeCloseTo(6000, 6)
+    expect(feeSum + (txn.costAllocation as number)).toBeCloseTo(8000, 6)
+  })
+
+  it('still surfaces the txn line at its input when totalCost is non-positive', () => {
+    const rows = allocateWaterfallCosts(
+      insertTransactionCostRow(computeIrrWaterfall([0.2, 0.18, 0.16, 0.15, 0.13, 0.11])),
+      null,
+      1500,
+    )
+    expect(rows.find((r) => r.kind === 'txn')!.costAllocation).toBeCloseTo(1500, 6)
+    expect(rows.filter((r) => r.kind !== 'txn').every((r) => r.costAllocation === null)).toBe(true)
+  })
+})
+
+describe('insertTransactionCostRow', () => {
+  it('splices a txn row right after "Our management fee" in the 6-stage shape', () => {
+    const rows = insertTransactionCostRow(computeIrrWaterfall([0.2, 0.18, 0.16, 0.15, 0.13, 0.11]))
+    const mgmtIdx = rows.findIndex((r) => r.label === OUR_MGMT_LABEL)
+    expect(rows[mgmtIdx + 1].kind).toBe('txn')
+    expect(rows[mgmtIdx + 1].label).toBe(TXN_LABEL)
+    expect(rows[mgmtIdx + 2].label).toBe('Our expenses & establishment')
+    // The txn row doesn't step the ladder: it carries the prior IRR and an explicit 0.00pp
+    // drag (always a number, never a dash) and the prior accumulated drag.
+    expect(rows[mgmtIdx + 1].irrAfter).toBe(rows[mgmtIdx].irrAfter)
+    expect(rows[mgmtIdx + 1].dragPp).toBe(0)
+    expect(rows[mgmtIdx + 1].accumulatedDragPp).toBe(rows[mgmtIdx].accumulatedDragPp)
+  })
+
+  it('is a no-op for the 3-stage (overlay-off) ladder (no overlay rows to sit between)', () => {
+    const base = computeIrrWaterfall([0.2, 0.16, 0.13])
+    expect(insertTransactionCostRow(base).some((r) => r.kind === 'txn')).toBe(false)
+  })
 })
 
 describe('allocateAnnualCosts', () => {
@@ -153,8 +202,14 @@ describe('buildKidView', () => {
     expect(v.perCase.find((r) => r.caseId === 'base')!.isBase).toBe(true)
     // stage3 TVPI = Σd / Σp = 7,200,000 / 4,400,000 ; valueBack = tvpi × principal
     const tvpi = 7_200_000 / 4_400_000
+    expect(v.perCase[1].tvpi).toBeCloseTo(tvpi, 6)
     expect(v.perCase[1].totalValueBack).toBeCloseTo(tvpi * principal, 6)
     expect(v.perCase[1].netIrr).toBe(0.13)
+    expect(v.perCase[1].grossIrr).toBe(0.2)
+    // cumulative figures are scaled to the investor (× scaleFactor).
+    const scale = principal / totalCommitment
+    expect(v.perCase[1].paidIn).toBeCloseTo(4_400_000 * scale, 6)
+    expect(v.perCase[1].distributions).toBeCloseTo(7_200_000 * scale, 6)
   })
 
   it('self-anchors: end accumulatedDragPp == annualCostDragPp, fee costs sum to total', () => {
@@ -170,5 +225,38 @@ describe('buildKidView', () => {
     expect(v.baseUsedFallback).toBe(true)
     // base = scenarios[0] = 'low' → its net IRR 0.10 drives the drag (0.15 − 0.10 = 5pp)
     expect(v.annualCostDragPp).toBeCloseTo(5, 6)
+  })
+
+  /** Overlay-on base case (6 IRR stages) so the waterfall carries the "Our ..." rows. */
+  function makeScenarios6(): KidScenarioInput[] {
+    const gross = makeStage(0)
+    const net = makeStage(0.1)
+    return [
+      { scenarioId: 'base', label: 'Base', isBase: true, stage1: gross, stage3: net, irrStages: [0.2, 0.18, 0.16, 0.15, 0.13, 0.11] },
+    ]
+  }
+
+  it('inserts a hard-coded transaction-cost line (txn × scale), carved from the total', () => {
+    const transactionCostTotal = 600_000
+    const v = buildKidView({ scenarios: makeScenarios6(), caseOrder: ['base'], baseScenarioId: 'base', baseUsedFallback: false, quartersLength: 8, totalCommitment, principal, transactionCostTotal })!
+    const scale = principal / totalCommitment
+    const labels = v.irrWaterfall.map((r) => r.label)
+    // Positioned between "Our management fee" and "Our expenses & establishment".
+    expect(labels.indexOf(TXN_LABEL)).toBe(labels.indexOf(OUR_MGMT_LABEL) + 1)
+    expect(labels[labels.indexOf(TXN_LABEL) + 1]).toBe('Our expenses & establishment')
+    const txn = v.irrWaterfall.find((r) => r.kind === 'txn')!
+    expect(txn.costAllocation).toBeCloseTo(transactionCostTotal * scale, 6)
+    // All cost lines (fee + txn) still sum to the total — the line is carved out, not added.
+    const sum = v.irrWaterfall
+      .filter((r) => r.kind === 'fee' || r.kind === 'txn')
+      .reduce((a, r) => a + (r.costAllocation ?? 0), 0)
+    expect(sum).toBeCloseTo(v.totalCostsOverPeriod, 4)
+  })
+
+  it('always shows the txn line (at 0) when no transaction cost is set', () => {
+    const v = buildKidView({ scenarios: makeScenarios6(), caseOrder: ['base'], baseScenarioId: 'base', baseUsedFallback: false, quartersLength: 8, totalCommitment, principal })!
+    const txn = v.irrWaterfall.find((r) => r.kind === 'txn')
+    expect(txn).toBeDefined()
+    expect(txn!.costAllocation).toBe(0)
   })
 })

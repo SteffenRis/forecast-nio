@@ -1,7 +1,10 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Percent } from 'lucide-react'
 import { useStore } from '@/store'
 import { cn } from '@/lib/cn'
 import { RoutePlaceholder } from '@/components/common/RoutePlaceholder'
+import { KebabMenu } from '@/components/common/KebabMenu'
 import { PortfolioEditor } from './PortfolioEditor'
 
 const fieldCls =
@@ -18,6 +21,7 @@ export function PortfoliosPage() {
   const duplicatePortfolio = useStore((s) => s.duplicatePortfolio)
   const removePortfolio = useStore((s) => s.removePortfolio)
   const select = useStore((s) => s.select)
+  const navigate = useNavigate()
 
   const [activeId, setActiveId] = useState<string>(() => {
     const st = useStore.getState()
@@ -26,6 +30,13 @@ export function PortfoliosPage() {
   })
 
   const effectiveId = portfolioOrder.includes(activeId) ? activeId : (portfolioOrder[0] ?? '')
+
+  // The LP-overlay fee editor lives on its own page; the kebab selects this portfolio
+  // and navigates there (mirrors the Funds-screen kebab → Edit-fund sub-page).
+  function openFees() {
+    select({ selectedPortfolioId: effectiveId || undefined })
+    navigate('/portfolios/fees')
+  }
 
   // Live editing (no draft): the slice's granular actions write through to the store,
   // and the pro-rata roll-up recomputes from the committed state as you type.
@@ -59,9 +70,17 @@ export function PortfoliosPage() {
             receives a pro-rata share of their cash flows. Changes save automatically.
           </p>
         </div>
-        <button type="button" className={primaryBtn} onClick={onNew}>
-          New portfolio
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button type="button" className={primaryBtn} onClick={onNew}>
+            New portfolio
+          </button>
+          {effectiveId && (
+            <KebabMenu
+              ariaLabel="Portfolio actions"
+              items={[{ label: 'Portfolio fees', icon: Percent, onClick: openFees }]}
+            />
+          )}
+        </div>
       </div>
 
       {portfolioOrder.length === 0 ? (
