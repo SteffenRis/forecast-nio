@@ -8,6 +8,8 @@ import type { FeeBasis, Fund, Template } from '@/store/types'
 import { NumberInput } from '@/components/common/NumberInput'
 import { DateInput } from '@/components/common/DateInput'
 import { Toggle } from '@/components/common/Toggle'
+import { Slider } from '@/components/common/Slider'
+import { DEFAULT_SLIDERS } from '@/store/slices/fundsSlice'
 
 const textField =
   'h-9 w-full rounded-md border border-border-default bg-white px-3 text-[13px] text-body outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100'
@@ -107,6 +109,46 @@ function MoneyField({
         />
       </div>
     </Field>
+  )
+}
+
+/** Range slider with an uppercase label, a live readout, and end labels. */
+function SliderField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  readout,
+  leftLabel,
+  rightLabel,
+  helper,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (n: number) => void
+  readout: string
+  leftLabel: string
+  rightLabel: string
+  helper?: string
+}) {
+  return (
+    <div className="block">
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+        <span className="text-[13px] font-semibold tabular-nums text-body">{readout}</span>
+      </div>
+      <Slider value={value} min={min} max={max} step={step} onChange={onChange} ariaLabel={label} />
+      <div className="mt-1 flex justify-between text-[10px] text-muted">
+        <span>{leftLabel}</span>
+        <span>{rightLabel}</span>
+      </div>
+      {helper && <p className="mt-1.5 text-[11px] leading-snug text-muted">{helper}</p>}
+    </div>
   )
 }
 
@@ -343,6 +385,72 @@ export function FundEditor({
               ariaLabel="Expected liquidation"
             />
           </Field>
+        </div>
+      </div>
+
+      {/* Profile shaping */}
+      <div className={card}>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Profile shaping
+            </h3>
+            <p className="mt-0.5 text-[12px] text-muted">
+              Tune the template's scenarios for this fund. The base case is untouched by
+              concentration.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => update((d) => { d.sliders = { ...DEFAULT_SLIDERS } })}
+            className="shrink-0 rounded-md border border-border-default bg-white px-2.5 py-1 text-[11px] font-medium text-muted hover:bg-slate-50"
+          >
+            Reset to template
+          </button>
+        </div>
+        <div className={grid2}>
+          <SliderField
+            label="Concentration index"
+            value={fund.sliders.concentration}
+            min={0}
+            max={2}
+            step={0.05}
+            onChange={(n) => update((d) => { d.sliders.concentration = n })}
+            readout={`${fund.sliders.concentration.toFixed(2)}×`}
+            leftLabel="Tight (0)"
+            rightLabel="Wide (2)"
+            helper="Spread of the Low/High scenarios around the base. Higher = more volatile; the base case is unchanged."
+          />
+          <SliderField
+            label="Cash-flow timing"
+            value={fund.sliders.dpiTiming}
+            min={-1}
+            max={1}
+            step={0.05}
+            onChange={(n) => update((d) => { d.sliders.dpiTiming = n })}
+            readout={
+              fund.sliders.dpiTiming === 0
+                ? 'Neutral'
+                : fund.sliders.dpiTiming < 0
+                  ? `Front-loaded (${fund.sliders.dpiTiming.toFixed(2)})`
+                  : `Back-loaded (+${fund.sliders.dpiTiming.toFixed(2)})`
+            }
+            leftLabel="Front-loaded (−1)"
+            rightLabel="Back-loaded (+1)"
+            helper="Pulls distributions earlier (front) or later (back) across all scenarios. Terminal DPI unchanged."
+          />
+          <SliderField
+            label="Ultimate DPI multiplier"
+            value={fund.sliders.dpiMultiplier}
+            min={0.5}
+            max={2}
+            step={0.05}
+            onChange={(n) => update((d) => { d.sliders.dpiMultiplier = n })}
+            readout={`${fund.sliders.dpiMultiplier.toFixed(2)}×`}
+            leftLabel="0.5×"
+            rightLabel="2.0×"
+            helper="Scales every scenario's DPI up or down. 1.00× = the template as drawn."
+          />
         </div>
       </div>
 
