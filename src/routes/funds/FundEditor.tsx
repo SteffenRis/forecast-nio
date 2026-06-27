@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Check } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { addYearsIso, formatMoneyCompact } from '@/lib/format'
 import { assetClassLabel } from '@/lib/assetClass'
@@ -10,14 +11,51 @@ import { DateInput } from '@/components/common/DateInput'
 import { Toggle } from '@/components/common/Toggle'
 import { Slider } from '@/components/common/Slider'
 import { DEFAULT_SLIDERS } from '@/store/slices/fundsSlice'
+import { selectBaselineForecastFor } from '@/store/selectors/forecast'
+import { buildFundComparison } from '@/lib/comparison'
+import { PerformanceGrid } from '@/routes/performance/PerformanceGrid'
 
 const textField =
   'h-9 w-full rounded-md border border-border-default bg-white px-3 text-[13px] text-body outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100'
 const selectField = cn(textField, 'pr-8')
 const card = 'rounded-xl border border-border-default bg-white p-5 shadow-sm'
 const grid2 = 'grid grid-cols-1 gap-4 sm:grid-cols-2'
+const navBtnPrimary =
+  'rounded-md bg-brand-navy px-4 py-1.5 text-[13px] font-semibold text-white hover:opacity-90'
+const navBtnSecondary =
+  'rounded-md border border-border-default bg-white px-3 py-1.5 text-[13px] font-medium text-body hover:bg-slate-50'
 
 const DEFAULT_LIFE = 10
+
+const FORM_STEPS = ['Details', 'Profile shaping'] as const
+
+/** Two-step progress indicator for the fund form. `current` is 1-based. */
+function FormStepper({ current }: { current: 1 | 2 }) {
+  return (
+    <ol className="flex items-center gap-2 text-[13px]">
+      {FORM_STEPS.map((label, i) => {
+        const step = i + 1
+        const done = step < current
+        const active = step === current
+        return (
+          <li key={label} className="flex items-center gap-2">
+            <span
+              className={cn(
+                'grid size-6 place-items-center rounded-full text-[11px] font-semibold',
+                (done || active) && 'bg-brand-navy text-white',
+                !done && !active && 'border border-border-default bg-white text-muted',
+              )}
+            >
+              {done ? <Check className="size-3.5" strokeWidth={2.5} /> : step}
+            </span>
+            <span className={cn('font-medium', active ? 'text-body' : 'text-muted')}>{label}</span>
+            {step < FORM_STEPS.length && <span className="mx-1 h-px w-8 bg-border-default" />}
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
 
 type BasisKey = 'mgmtBasisIp' | 'mgmtBasisPostIp' | 'expenseBasisIp' | 'expenseBasisPostIp'
 
@@ -171,6 +209,11 @@ export function FundEditor({
   onSave,
   onDiscard,
 }: Props) {
+  // Wizard page: 1 = Details, 2 = Profile shaping. Resets to 1 on remount (per fund).
+  const [page, setPage] = useState<1 | 2>(1)
+  // Forecast-preview scenario on page 2 ('' = base scenario default).
+  const [scenarioId, setScenarioId] = useState('')
+
   // Cmd/Ctrl+S saves when there are pending changes.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -185,6 +228,23 @@ export function FundEditor({
 
   const template = templates[fund.templateId]
   const lifeOf = (templateId: string) => templates[templateId]?.fundLifeYears ?? DEFAULT_LIFE
+
+  // Live forecast preview for the draft (page 2). Recomputes whenever the draft's
+  // reference changes (immer hands back a new fund on every slider tick) or the
+  // selected scenario changes — mirrors PerformancePage's baseline-plan assembly.
+  const forecastData = useMemo(() => {
+    if (!template) return []
+    const baseline = selectBaselineForecastFor(fund, template)
+    const wantId = scenarioId || template.baseScenarioId
+    const scenario =
+      baseline.scenarios.find((sc) => sc.scenarioId === wantId) ?? baseline.scenarios[0]
+    return buildFundComparison({
+      commitment: fund.commitment,
+      effectiveDate: fund.effectiveDate,
+      actuals: fund.actuals,
+      forecastRows: scenario?.rows ?? [],
+    })
+  }, [fund, template, scenarioId])
 
   // Basis <select> bound to one of the four FeeBasis keys.
   function basisSelect(key: BasisKey, label: string) {
@@ -245,6 +305,11 @@ export function FundEditor({
         </div>
       </div>
 
+      {/* Step indicator */}
+      <FormStepper current={page} />
+
+      {page === 1 && (
+        <>
       {/* Identity */}
       <div className={card}>
         <SectionHeader title="Identity" sub="How the fund and its manager are named." />
@@ -388,6 +453,11 @@ export function FundEditor({
         </div>
       </div>
 
+        </>
+      )}
+
+      {page === 2 && (
+        <>
       {/* Profile shaping */}
       <div className={card}>
         <div className="mb-4 flex items-start justify-between gap-3">
@@ -454,6 +524,53 @@ export function FundEditor({
         </div>
       </div>
 
+      {/* Forecast preview — reuses the Performance grid, driven by the live draft */}
+      {template && (
+        <div>
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Forecast preview
+              </h3>
+              <p className="mt-0.5 max-w-xl text-[12px] text-muted">
+                How these knobs reshape the plan. Pick a scenario to see the concentration
+                slider's effect on the Low/High cases.
+              </p>
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Scenario
+              </span>
+              <select
+                className={cn(selectField, 'min-w-[180px]')}
+                value={scenarioId || template.baseScenarioId}
+                onChange={(e) => setScenarioId(e.target.value)}
+                aria-label="Forecast scenario"
+              >
+                {template.scenarioOrder.map((id) => (
+                  <option key={id} value={id}>
+                    {template.scenarios[id]?.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <PerformanceGrid
+            currency={fund.currency}
+            data={forecastData}
+            showForecast
+            onToggleForecast={() => {}}
+            hideToggle
+            title="Plan"
+          />
+        </div>
+      )}
+
+        </>
+      )}
+
+      {page === 1 && (
+        <>
       {/* Management Fees & Expenses */}
       <div className={card}>
         <SectionHeader
@@ -529,6 +646,24 @@ export function FundEditor({
             className="mt-0.5"
           />
         </div>
+      </div>
+        </>
+      )}
+
+      {/* Page navigation */}
+      <div className="flex items-center justify-between">
+        {page === 2 ? (
+          <button type="button" className={navBtnSecondary} onClick={() => setPage(1)}>
+            ← Back
+          </button>
+        ) : (
+          <span />
+        )}
+        {page === 1 && (
+          <button type="button" className={navBtnPrimary} onClick={() => setPage(2)}>
+            Next: Profile shaping →
+          </button>
+        )}
       </div>
     </div>
   )
