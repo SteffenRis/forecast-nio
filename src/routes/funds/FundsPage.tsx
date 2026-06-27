@@ -32,6 +32,12 @@ export function FundsPage() {
     return sel && st.fundOrder.includes(sel) ? sel : (st.fundOrder[0] ?? '')
   })
 
+  // Template to apply when creating the next fund (defaults to the first).
+  const [newFundTemplateId, setNewFundTemplateId] = useState<string>(templateOrder[0] ?? '')
+  const effectiveNewTemplateId = templateOrder.includes(newFundTemplateId)
+    ? newFundTemplateId
+    : (templateOrder[0] ?? '')
+
   const effectiveId = fundOrder.includes(activeId) ? activeId : (fundOrder[0] ?? '')
   const stored = effectiveId ? funds[effectiveId] : undefined
 
@@ -61,7 +67,7 @@ export function FundsPage() {
   }
   function onNew() {
     if (!confirmIfDirty()) return
-    const templateId = templateOrder[0]
+    const templateId = effectiveNewTemplateId || templateOrder[0]
     if (!templateId) return
     go(addFund(templateId))
   }
@@ -97,9 +103,25 @@ export function FundsPage() {
             and carry. Edits stage below until you Save.
           </p>
         </div>
-        <button type="button" className={primaryBtn} onClick={onNew} disabled={noTemplates}>
-          New fund
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {templateOrder.length > 1 && (
+            <select
+              className={cn(fieldCls, 'min-w-[180px] pr-8')}
+              value={effectiveNewTemplateId}
+              onChange={(e) => setNewFundTemplateId(e.target.value)}
+              aria-label="Template for new fund"
+            >
+              {templateOrder.map((id) => (
+                <option key={id} value={id}>
+                  {templates[id]?.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <button type="button" className={primaryBtn} onClick={onNew} disabled={noTemplates}>
+            New fund
+          </button>
+        </div>
       </div>
 
       {noTemplates ? (
